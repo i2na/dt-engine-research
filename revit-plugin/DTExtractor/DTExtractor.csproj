@@ -43,11 +43,16 @@
   </ItemGroup>
 
   <Target Name="PostBuild" AfterTargets="PostBuildEvent">
+    <PropertyGroup>
+      <_AddinDestDir>$(AppData)\Autodesk\Revit\Addins\$(RevitVersion)</_AddinDestDir>
+    </PropertyGroup>
     <ItemGroup>
       <_AddinFiles Include="$(TargetPath)" />
       <_AddinFiles Include="$(OutDir)*.dll" />
-      <_AddinFiles Include="DTExtractor.addin" />
+      <_AddinFiles Include="$(ProjectDir)DTExtractor.addin" />
+      <_AddinDestFiles Include="@(_AddinFiles->'$(_AddinDestDir)\%(Filename)%(Extension)')" />
     </ItemGroup>
-    <Copy SourceFiles="@(_AddinFiles)" DestinationFolder="$(AppData)\Autodesk\Revit\Addins\$(RevitVersion)" SkipUnchangedFiles="true" />
+    <Delete Files="@(_AddinDestFiles)" />
+    <Copy SourceFiles="@(_AddinFiles)" DestinationFolder="$(_AddinDestDir)" SkipUnchangedFiles="true" />
   </Target>
 </Project>
