@@ -41,7 +41,9 @@ namespace DTExtractor.Commands
 
                     outputPath = saveDialog.FileName;
 
-                    // Progress dialog
+                    DTGeometryExporter exporter = null;
+                    string exportLogPath = null;
+
                     var progressDialog = new TaskDialog("Exporting to DT Engine")
                     {
                         MainInstruction = "Exporting geometry and metadata...",
@@ -63,7 +65,7 @@ namespace DTExtractor.Commands
                             return Result.Failed;
                         }
 
-                        var exporter = new DTGeometryExporter(doc, outputPath);
+                        exporter = new DTGeometryExporter(doc, outputPath);
                         var customExporter = new CustomExporter(doc, exporter);
                         customExporter.IncludeGeometricObjects = true;
                         customExporter.ShouldStopOnError = false;
@@ -78,10 +80,10 @@ namespace DTExtractor.Commands
 
                         tx.Commit();
 
-                        var logPath = Path.ChangeExtension(outputPath, ".export-log.txt");
+                        exportLogPath = Path.ChangeExtension(outputPath, ".export-log.txt");
                         try
                         {
-                            File.AppendAllText(logPath, $"[{DateTime.Now:HH:mm:ss}] Export() took {swExport.Elapsed.TotalSeconds:F1}s, Finish() took {swFinish.Elapsed.TotalSeconds:F1}s. elements={exporter.ElementCount}, polymeshes={exporter.PolymeshCount}\r\n");
+                            File.AppendAllText(exportLogPath, $"[{DateTime.Now:HH:mm:ss}] Export() took {swExport.Elapsed.TotalSeconds:F1}s, Finish() took {swFinish.Elapsed.TotalSeconds:F1}s. elements={exporter.ElementCount}, polymeshes={exporter.PolymeshCount}\r\n");
                         }
                         catch { }
                     }
@@ -93,7 +95,6 @@ namespace DTExtractor.Commands
                     var glbSize = new FileInfo(glbPath).Length / 1024.0 / 1024.0;
                     var parquetSize = new FileInfo(parquetPath).Length / 1024.0 / 1024.0;
 
-                    var logPath = Path.ChangeExtension(outputPath, ".export-log.txt");
                     TaskDialog.Show(
                         "Export Complete",
                         $"Files exported successfully:\n\n" +
@@ -101,7 +102,7 @@ namespace DTExtractor.Commands
                         $"Metadata: {Path.GetFileName(parquetPath)} ({parquetSize:F2} MB)\n" +
                         $"Elements: {exporter.ElementCount}, Polymeshes: {exporter.PolymeshCount}\n\n" +
                         $"Output: {Path.GetDirectoryName(outputPath)}\n" +
-                        $"Diagnostic log: {Path.GetFileName(logPath)}");
+                        $"Diagnostic log: {Path.GetFileName(exportLogPath)}");
 
                     return Result.Succeeded;
                 }
@@ -109,9 +110,9 @@ namespace DTExtractor.Commands
             catch (Exception ex)
             {
                 message = ex.Message;
-                var logPath = outputPath != null ? Path.ChangeExtension(outputPath, ".export-log.txt") : null;
-                var logHint = !string.IsNullOrEmpty(logPath) && File.Exists(logPath)
-                    ? $"\n\nCheck {logPath} for progress and errors."
+                var errorLogPath = outputPath != null ? Path.ChangeExtension(outputPath, ".export-log.txt") : null;
+                var logHint = !string.IsNullOrEmpty(errorLogPath) && File.Exists(errorLogPath)
+                    ? $"\n\nCheck {errorLogPath} for progress and errors."
                     : "";
                 TaskDialog.Show("Export Error", $"An error occurred during export:\n\n{ex.Message}\n\n{ex.StackTrace}{logHint}");
                 return Result.Failed;
