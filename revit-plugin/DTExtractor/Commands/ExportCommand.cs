@@ -33,7 +33,7 @@ namespace DTExtractor.Commands
                 {
                     saveDialog.Title = "Export to DT Engine";
                     saveDialog.Filter = "GLB files (*.glb)|*.glb";
-                    saveDialog.FileName = Path.GetFileNameWithoutExtension(doc.PathName) + ".glb";
+                    saveDialog.FileName = "model.glb";
 
                     if (saveDialog.ShowDialog() != DialogResult.OK)
                         return Result.Cancelled;

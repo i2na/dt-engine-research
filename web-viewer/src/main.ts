@@ -42,8 +42,8 @@ async function main() {
         };
 
         // Load model
-        const glbUrl = "/models/sample.glb";
-        const parquetUrl = "/models/sample.parquet";
+        const glbUrl = "/models/model.glb";
+        const parquetUrl = "/models/model.parquet";
 
         loadingEl.classList.remove("hidden");
 
