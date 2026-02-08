@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Autodesk.Revit.DB;
 using SharpGLTF.Geometry;
 using SharpGLTF.Geometry.VertexTypes;
@@ -111,8 +112,7 @@ namespace DTExtractor.Core
             var matrix = ToMatrix4x4(transform);
             instanceNode.LocalMatrix = matrix;
 
-            var extrasJson = JsonSerializer.SerializeToElement(new { guid = guid, name = name });
-            instanceNode.Extras = extrasJson;
+            instanceNode.Extras = JsonSerializer.SerializeToNode(new { guid = guid, name = name });
         }
 
         private MaterialBuilder GetOrCreateMaterial(MaterialData data)
@@ -139,14 +139,13 @@ namespace DTExtractor.Core
         {
             var glbPath = System.IO.Path.ChangeExtension(OutputPath, ".glb");
 
-            var modelExtras = JsonSerializer.SerializeToElement(new
+            _model.Extras = JsonSerializer.SerializeToNode(new
             {
                 generator = "DTExtractor",
                 version = "1.0.0",
                 guidCount = _guidList.Count,
                 extractedAt = DateTime.UtcNow.ToString("o")
             });
-            _model.Extras = modelExtras;
 
             // Save with Draco compression (if available)
             var settings = new SharpGLTF.Schema2.WriteSettings

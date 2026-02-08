@@ -128,7 +128,7 @@ namespace DTExtractor.Core
                                 record.DisplayValue = refElement.Name;
                             }
                         }
-                        record.Value = elemId?.IntegerValue ?? -1;
+                        record.Value = elemId != null ? unchecked((int)elemId.Value) : -1;
                         break;
                 }
 
