@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
+using System.Text.Json;
 using Autodesk.Revit.DB;
 using SharpGLTF.Geometry;
 using SharpGLTF.Geometry.VertexTypes;
@@ -21,7 +22,7 @@ namespace DTExtractor.Core
         private readonly ModelRoot _model;
         private readonly Scene _scene;
         private readonly Dictionary<int, Node> _meshNodes;
-        private readonly Dictionary<string, int> _materialMap;
+        private readonly Dictionary<string, MaterialBuilder> _materialMap;
         private readonly List<string> _guidList;
 
         private int _nextMeshId = 0;
@@ -32,7 +33,7 @@ namespace DTExtractor.Core
             _model = ModelRoot.CreateModel();
             _scene = _model.UseScene("default");
             _meshNodes = new Dictionary<int, Node>();
-            _materialMap = new Dictionary<string, int>();
+            _materialMap = new Dictionary<string, MaterialBuilder>();
             _guidList = new List<string>();
         }
 
@@ -67,19 +68,22 @@ namespace DTExtractor.Core
                 var uv1 = uvs != null && uvs.Count > indices[i + 1] ? uvs[indices[i + 1]] : new UV(0, 0);
                 var uv2 = uvs != null && uvs.Count > indices[i + 2] ? uvs[indices[i + 2]] : new UV(0, 0);
 
-                var vtx0 = new VertexBuilder<VertexPositionNormal, VertexTexture1>(
+                var vtx0 = new VertexBuilder<VertexPositionNormal, VertexTexture1, VertexEmpty>(
                     new VertexPositionNormal(ToVector3(v0), ToVector3(n0)),
-                    new VertexTexture1(ToVector2(uv0))
+                    new VertexTexture1(ToVector2(uv0)),
+                    default
                 );
 
-                var vtx1 = new VertexBuilder<VertexPositionNormal, VertexTexture1>(
+                var vtx1 = new VertexBuilder<VertexPositionNormal, VertexTexture1, VertexEmpty>(
                     new VertexPositionNormal(ToVector3(v1), ToVector3(n1)),
-                    new VertexTexture1(ToVector2(uv1))
+                    new VertexTexture1(ToVector2(uv1)),
+                    default
                 );
 
-                var vtx2 = new VertexBuilder<VertexPositionNormal, VertexTexture1>(
+                var vtx2 = new VertexBuilder<VertexPositionNormal, VertexTexture1, VertexEmpty>(
                     new VertexPositionNormal(ToVector3(v2), ToVector3(n2)),
-                    new VertexTexture1(ToVector2(uv2))
+                    new VertexTexture1(ToVector2(uv2)),
+                    default
                 );
 
                 prim.AddTriangle(vtx0, vtx1, vtx2);
@@ -107,31 +111,27 @@ namespace DTExtractor.Core
             var matrix = ToMatrix4x4(transform);
             instanceNode.LocalMatrix = matrix;
 
-            // Store GUID in extras
-            instanceNode.Extras = SharpGLTF.IO.JsonContent.CreateFrom(new
-            {
-                guid = guid,
-                name = name
-            });
+            var extrasJson = JsonSerializer.SerializeToElement(new { guid = guid, name = name });
+            instanceNode.Extras = extrasJson;
         }
 
         private MaterialBuilder GetOrCreateMaterial(MaterialData data)
         {
             string key = $"{data.Color[0]:F2}_{data.Color[1]:F2}_{data.Color[2]:F2}";
 
-            if (_materialMap.ContainsKey(key))
-                return _model.LogicalMaterials[_materialMap[key]];
+            if (_materialMap.TryGetValue(key, out var cached))
+                return cached;
 
             var material = new MaterialBuilder($"mat_{_materialMap.Count}")
                 .WithMetallicRoughnessShader()
-                .WithChannelParam("BaseColor", new Vector4(
+                .WithBaseColor(new Vector4(
                     (float)data.Color[0],
                     (float)data.Color[1],
                     (float)data.Color[2],
                     (float)(1.0 - data.Transparency)))
-                .WithChannelParam("MetallicRoughness", new Vector2(0.0f, (float)(1.0 - data.Smoothness)));
+                .WithMetallicRoughness(metallic: 0f, roughness: (float)(1.0 - data.Smoothness));
 
-            _materialMap[key] = _model.LogicalMaterials.Count;
+            _materialMap[key] = material;
             return material;
         }
 
@@ -139,14 +139,14 @@ namespace DTExtractor.Core
         {
             var glbPath = System.IO.Path.ChangeExtension(OutputPath, ".glb");
 
-            // Add GUID metadata to model extras
-            _model.Extras = SharpGLTF.IO.JsonContent.CreateFrom(new
+            var modelExtras = JsonSerializer.SerializeToElement(new
             {
                 generator = "DTExtractor",
                 version = "1.0.0",
                 guidCount = _guidList.Count,
                 extractedAt = DateTime.UtcNow.ToString("o")
             });
+            _model.Extras = modelExtras;
 
             // Save with Draco compression (if available)
             var settings = new SharpGLTF.Schema2.WriteSettings

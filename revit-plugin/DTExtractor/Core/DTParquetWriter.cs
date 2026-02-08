@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 using Parquet;
 using Parquet.Data;
 using Parquet.Schema;
@@ -76,36 +78,43 @@ namespace DTExtractor.Core
 
             var extractedAt = records.Select(r => r.ExtractedAt).ToArray();
 
-            // Write to Parquet with Snappy compression
-            using (var stream = System.IO.File.Create(_outputPath))
-            {
-                using (var writer = new ParquetWriter(schema, stream))
-                {
-                    writer.CompressionMethod = CompressionMethod.Snappy;
+            WriteAsync(schema, guids, elementIds, categories, categoryIds, familyNames, typeNames,
+                levelNames, phaseNames, volumes, areas, bboxMinX, bboxMinY, bboxMinZ, bboxMaxX, bboxMaxY, bboxMaxZ,
+                instanceParams, typeParams, builtinParams, extractedAt).GetAwaiter().GetResult();
+        }
 
-                    using (var groupWriter = writer.CreateRowGroup())
-                    {
-                        groupWriter.WriteColumn(new DataColumn(schema.DataFields[0], guids));
-                        groupWriter.WriteColumn(new DataColumn(schema.DataFields[1], elementIds));
-                        groupWriter.WriteColumn(new DataColumn(schema.DataFields[2], categories));
-                        groupWriter.WriteColumn(new DataColumn(schema.DataFields[3], categoryIds));
-                        groupWriter.WriteColumn(new DataColumn(schema.DataFields[4], familyNames));
-                        groupWriter.WriteColumn(new DataColumn(schema.DataFields[5], typeNames));
-                        groupWriter.WriteColumn(new DataColumn(schema.DataFields[6], levelNames));
-                        groupWriter.WriteColumn(new DataColumn(schema.DataFields[7], phaseNames));
-                        groupWriter.WriteColumn(new DataColumn(schema.DataFields[8], volumes));
-                        groupWriter.WriteColumn(new DataColumn(schema.DataFields[9], areas));
-                        groupWriter.WriteColumn(new DataColumn(schema.DataFields[10], bboxMinX));
-                        groupWriter.WriteColumn(new DataColumn(schema.DataFields[11], bboxMinY));
-                        groupWriter.WriteColumn(new DataColumn(schema.DataFields[12], bboxMinZ));
-                        groupWriter.WriteColumn(new DataColumn(schema.DataFields[13], bboxMaxX));
-                        groupWriter.WriteColumn(new DataColumn(schema.DataFields[14], bboxMaxY));
-                        groupWriter.WriteColumn(new DataColumn(schema.DataFields[15], bboxMaxZ));
-                        groupWriter.WriteColumn(new DataColumn(schema.DataFields[16], instanceParams));
-                        groupWriter.WriteColumn(new DataColumn(schema.DataFields[17], typeParams));
-                        groupWriter.WriteColumn(new DataColumn(schema.DataFields[18], builtinParams));
-                        groupWriter.WriteColumn(new DataColumn(schema.DataFields[19], extractedAt));
-                    }
+        private async Task WriteAsync(ParquetSchema schema,
+            string[] guids, int[] elementIds, string[] categories, int?[] categoryIds, string[] familyNames, string[] typeNames,
+            string[] levelNames, string[] phaseNames, double[] volumes, double[] areas,
+            string[] bboxMinX, string[] bboxMinY, string[] bboxMinZ, string[] bboxMaxX, string[] bboxMaxY, string[] bboxMaxZ,
+            string[] instanceParams, string[] typeParams, string[] builtinParams, DateTime[] extractedAt)
+        {
+            using (var stream = File.Create(_outputPath))
+            using (var writer = await ParquetWriter.CreateAsync(schema, stream))
+            {
+                writer.CompressionMethod = CompressionMethod.Snappy;
+                using (var groupWriter = writer.CreateRowGroup())
+                {
+                    await groupWriter.WriteColumnAsync(new DataColumn(schema.DataFields[0], guids));
+                    await groupWriter.WriteColumnAsync(new DataColumn(schema.DataFields[1], elementIds));
+                    await groupWriter.WriteColumnAsync(new DataColumn(schema.DataFields[2], categories));
+                    await groupWriter.WriteColumnAsync(new DataColumn(schema.DataFields[3], categoryIds));
+                    await groupWriter.WriteColumnAsync(new DataColumn(schema.DataFields[4], familyNames));
+                    await groupWriter.WriteColumnAsync(new DataColumn(schema.DataFields[5], typeNames));
+                    await groupWriter.WriteColumnAsync(new DataColumn(schema.DataFields[6], levelNames));
+                    await groupWriter.WriteColumnAsync(new DataColumn(schema.DataFields[7], phaseNames));
+                    await groupWriter.WriteColumnAsync(new DataColumn(schema.DataFields[8], volumes));
+                    await groupWriter.WriteColumnAsync(new DataColumn(schema.DataFields[9], areas));
+                    await groupWriter.WriteColumnAsync(new DataColumn(schema.DataFields[10], bboxMinX));
+                    await groupWriter.WriteColumnAsync(new DataColumn(schema.DataFields[11], bboxMinY));
+                    await groupWriter.WriteColumnAsync(new DataColumn(schema.DataFields[12], bboxMinZ));
+                    await groupWriter.WriteColumnAsync(new DataColumn(schema.DataFields[13], bboxMaxX));
+                    await groupWriter.WriteColumnAsync(new DataColumn(schema.DataFields[14], bboxMaxY));
+                    await groupWriter.WriteColumnAsync(new DataColumn(schema.DataFields[15], bboxMaxZ));
+                    await groupWriter.WriteColumnAsync(new DataColumn(schema.DataFields[16], instanceParams));
+                    await groupWriter.WriteColumnAsync(new DataColumn(schema.DataFields[17], typeParams));
+                    await groupWriter.WriteColumnAsync(new DataColumn(schema.DataFields[18], builtinParams));
+                    await groupWriter.WriteColumnAsync(new DataColumn(schema.DataFields[19], extractedAt));
                 }
             }
         }

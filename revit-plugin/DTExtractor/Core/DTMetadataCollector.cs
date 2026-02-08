@@ -21,9 +21,9 @@ namespace DTExtractor.Core
             var record = new DTElementRecord
             {
                 Guid = element.UniqueId,
-                ElementId = element.Id.IntegerValue,
+                ElementId = unchecked((int)element.Id.Value),
                 Category = element.Category?.Name ?? "Unknown",
-                CategoryId = element.Category?.Id.IntegerValue,
+                CategoryId = element.Category != null ? unchecked((int?)element.Category.Id.Value) : null,
                 LevelName = GetLevelName(element),
                 PhaseName = GetPhaseName(element),
                 BoundingBox = GetBoundingBox(element),
@@ -89,7 +89,11 @@ namespace DTExtractor.Core
                     HasValue = param.HasValue,
                     IsShared = param.IsShared,
                     IsReadOnly = param.IsReadOnly,
+#if REVIT2024
+                    Group = param.Definition.GetGroupTypeId()?.TypeId ?? ""
+#else
                     Group = param.Definition.ParameterGroup.ToString()
+#endif
                 };
 
                 // Extract value based on storage type
