@@ -92,7 +92,8 @@ namespace DTExtractor.Core
             using (var stream = File.Create(_outputPath))
             using (var writer = await ParquetWriter.CreateAsync(schema, stream))
             {
-                writer.CompressionMethod = CompressionMethod.Snappy;
+                writer.CompressionMethod = CompressionMethod.Gzip;
+                writer.CompressionLevel = System.IO.Compression.CompressionLevel.Optimal;
                 using (var groupWriter = writer.CreateRowGroup())
                 {
                     await groupWriter.WriteColumnAsync(new DataColumn(schema.DataFields[0], guids));
