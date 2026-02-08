@@ -59,7 +59,10 @@ namespace DTExtractor.Core
             catch { }
 
             _gltfBuilder.SerializeToGlb();
+            try { System.IO.File.AppendAllText(_logPath, $"[{DateTime.Now:HH:mm:ss}] GLB written.\r\n"); } catch { }
+
             _metadataCollector.SerializeToParquet(_gltfBuilder.OutputPath);
+            try { System.IO.File.AppendAllText(_logPath, $"[{DateTime.Now:HH:mm:ss}] Parquet written.\r\n"); } catch { }
 
             // GUID consistency validation
             var gltfGuids = _gltfBuilder.GetAllGuids();

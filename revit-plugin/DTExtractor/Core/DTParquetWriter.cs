@@ -78,9 +78,9 @@ namespace DTExtractor.Core
 
             var extractedAt = records.Select(r => r.ExtractedAt).ToArray();
 
-            WriteAsync(schema, guids, elementIds, categories, categoryIds, familyNames, typeNames,
+            Task.Run(() => WriteAsync(schema, guids, elementIds, categories, categoryIds, familyNames, typeNames,
                 levelNames, phaseNames, volumes, areas, bboxMinX, bboxMinY, bboxMinZ, bboxMaxX, bboxMaxY, bboxMaxZ,
-                instanceParams, typeParams, builtinParams, extractedAt).GetAwaiter().GetResult();
+                instanceParams, typeParams, builtinParams, extractedAt)).GetAwaiter().GetResult();
         }
 
         private async Task WriteAsync(ParquetSchema schema,
