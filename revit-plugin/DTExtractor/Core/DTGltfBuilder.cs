@@ -22,7 +22,7 @@ namespace DTExtractor.Core
 
         private readonly ModelRoot _model;
         private readonly Scene _scene;
-        private readonly Dictionary<int, Mesh> _meshes;
+        private readonly Dictionary<int, SharpGLTF.Schema2.Mesh> _meshes;
         private readonly Dictionary<string, MaterialBuilder> _materialMap;
         private readonly List<string> _guidList;
 
@@ -33,7 +33,7 @@ namespace DTExtractor.Core
             OutputPath = outputPath;
             _model = ModelRoot.CreateModel();
             _scene = _model.UseScene("default");
-            _meshes = new Dictionary<int, Mesh>();
+            _meshes = new Dictionary<int, SharpGLTF.Schema2.Mesh>();
             _materialMap = new Dictionary<string, MaterialBuilder>();
             _guidList = new List<string>();
         }
