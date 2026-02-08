@@ -64,12 +64,20 @@ namespace DTExtractor.Core
             _metadataCollector.SerializeToParquet(_gltfBuilder.OutputPath);
             try { System.IO.File.AppendAllText(_logPath, $"[{DateTime.Now:HH:mm:ss}] Parquet written.\r\n"); } catch { }
 
-            // GUID consistency validation
             var gltfGuids = _gltfBuilder.GetAllGuids();
             var parquetGuids = _metadataCollector.GetAllGuids();
 
             if (!gltfGuids.SetEquals(parquetGuids))
             {
+                if (gltfGuids.Count == 0 && parquetGuids.Count > 0)
+                {
+                    try
+                    {
+                        System.IO.File.AppendAllText(_logPath, $"[{DateTime.Now:HH:mm:ss}] Warning: {parquetGuids.Count} element(s) had no exportable geometry in this view (GLB: 0). Parquet only.\r\n");
+                    }
+                    catch { }
+                    return;
+                }
                 throw new InvalidOperationException(
                     "GUID mismatch between GLB and Parquet outputs. " +
                     $"GLB: {gltfGuids.Count}, Parquet: {parquetGuids.Count}");
