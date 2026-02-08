@@ -125,7 +125,7 @@ namespace DTExtractor.Core
             var uvs = polymesh.GetUVs();
             var facets = polymesh.GetFacets();
 
-            if (points.Count == 0 || facets.NumberOfFacets == 0)
+            if (points.Count == 0 || facets.Count == 0)
                 return;
 
             // Transform to world space
@@ -144,9 +144,9 @@ namespace DTExtractor.Core
 
             // Build triangle indices
             var indices = new List<int>();
-            for (int i = 0; i < facets.NumberOfFacets; i++)
+            for (int i = 0; i < facets.Count; i++)
             {
-                var facet = facets.get_Facet(i);
+                var facet = facets[i];
                 // Revit facets are always triangulated
                 indices.Add(facet.V1);
                 indices.Add(facet.V2);
@@ -184,7 +184,7 @@ namespace DTExtractor.Core
             // RPC nodes not supported
         }
 
-        public void OnFaceBegin(FaceNode node)
+        public RenderNodeAction OnFaceBegin(FaceNode node)
         {
             return RenderNodeAction.Proceed;
         }
@@ -193,7 +193,7 @@ namespace DTExtractor.Core
         {
         }
 
-        public void OnLinkBegin(LinkNode node)
+        public RenderNodeAction OnLinkBegin(LinkNode node)
         {
             return RenderNodeAction.Proceed;
         }
