@@ -186,7 +186,7 @@ namespace DTExtractor.Core
 
         public void OnFaceBegin(FaceNode node)
         {
-            // Face-level callbacks not needed
+            return RenderNodeAction.Proceed;
         }
 
         public void OnFaceEnd(FaceNode node)
@@ -195,7 +195,7 @@ namespace DTExtractor.Core
 
         public void OnLinkBegin(LinkNode node)
         {
-            // Linked models handled separately
+            return RenderNodeAction.Proceed;
         }
 
         public void OnLinkEnd(LinkNode node)
