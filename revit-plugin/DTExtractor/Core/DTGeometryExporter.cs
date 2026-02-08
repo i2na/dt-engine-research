@@ -19,10 +19,11 @@ namespace DTExtractor.Core
         private readonly DTMetadataCollector _metadataCollector;
         private readonly Dictionary<string, int> _meshHashMap;
 
-        private Element _currentElement;
         private string _currentGuid;
+        private string _currentName;
         private MaterialNode _currentMaterial;
-        private Transform _currentTransform = Transform.Identity;
+        private readonly Stack<Transform> _transformStack = new Stack<Transform>();
+        private bool _currentElementHasGeometry;
 
         private int _elementCount;
         private int _polymeshCount;
@@ -54,9 +55,14 @@ namespace DTExtractor.Core
         {
             try
             {
-                System.IO.File.AppendAllText(_logPath, $"[{DateTime.Now:HH:mm:ss}] Export callback finished. elements={_elementCount}, polymeshes={_polymeshCount}. Writing GLB and Parquet...\r\n");
+                System.IO.File.AppendAllText(_logPath, $"[{DateTime.Now:HH:mm:ss}] Export callback finished. elements={_elementCount}, polymeshes={_polymeshCount}\r\n");
             }
             catch { }
+        }
+
+        public void Serialize()
+        {
+            try { System.IO.File.AppendAllText(_logPath, $"[{DateTime.Now:HH:mm:ss}] Writing GLB and Parquet...\r\n"); } catch { }
 
             _gltfBuilder.SerializeToGlb();
             try { System.IO.File.AppendAllText(_logPath, $"[{DateTime.Now:HH:mm:ss}] GLB written.\r\n"); } catch { }
@@ -69,18 +75,23 @@ namespace DTExtractor.Core
 
             if (!gltfGuids.SetEquals(parquetGuids))
             {
-                if (gltfGuids.Count == 0 && parquetGuids.Count > 0)
+                var onlyInGlb = new HashSet<string>(gltfGuids);
+                onlyInGlb.ExceptWith(parquetGuids);
+                var onlyInParquet = new HashSet<string>(parquetGuids);
+                onlyInParquet.ExceptWith(gltfGuids);
+
+                try
                 {
-                    try
-                    {
-                        System.IO.File.AppendAllText(_logPath, $"[{DateTime.Now:HH:mm:ss}] Warning: {parquetGuids.Count} element(s) had no exportable geometry in this view (GLB: 0). Parquet only.\r\n");
-                    }
-                    catch { }
-                    return;
+                    System.IO.File.AppendAllText(_logPath,
+                        $"[{DateTime.Now:HH:mm:ss}] GUID mismatch: GLB={gltfGuids.Count}, Parquet={parquetGuids.Count}, " +
+                        $"only in GLB={onlyInGlb.Count}, only in Parquet={onlyInParquet.Count}\r\n");
                 }
+                catch { }
+
                 throw new InvalidOperationException(
-                    "GUID mismatch between GLB and Parquet outputs. " +
-                    $"GLB: {gltfGuids.Count}, Parquet: {parquetGuids.Count}");
+                    $"GUID mismatch between GLB and Parquet outputs. " +
+                    $"GLB: {gltfGuids.Count}, Parquet: {parquetGuids.Count}. " +
+                    $"Only in GLB: {onlyInGlb.Count}, Only in Parquet: {onlyInParquet.Count}");
             }
         }
 
@@ -103,16 +114,18 @@ namespace DTExtractor.Core
 
         public RenderNodeAction OnElementBegin(ElementId elementId)
         {
-            _currentElement = _doc.GetElement(elementId);
-            if (_currentElement == null)
+            var element = _doc.GetElement(elementId);
+            if (element == null)
                 return RenderNodeAction.Skip;
 
-            _currentGuid = _currentElement.UniqueId;
+            _currentGuid = element.UniqueId;
+            _currentName = element.Name;
+            _currentElementHasGeometry = false;
             _elementCount++;
 
             try
             {
-                _metadataCollector.ExtractElement(_currentElement);
+                _metadataCollector.ExtractElement(element);
             }
             catch (Exception ex)
             {
@@ -137,20 +150,24 @@ namespace DTExtractor.Core
 
         public void OnElementEnd(ElementId elementId)
         {
-            _currentElement = null;
+            if (!_currentElementHasGeometry && _currentGuid != null)
+                _metadataCollector.RemoveElement(_currentGuid);
+
             _currentGuid = null;
-            _currentTransform = Transform.Identity;
+            _currentName = null;
         }
 
         public RenderNodeAction OnInstanceBegin(InstanceNode node)
         {
-            _currentTransform = node.GetTransform();
+            var parent = _transformStack.Count > 0 ? _transformStack.Peek() : Transform.Identity;
+            _transformStack.Push(parent.Multiply(node.GetTransform()));
             return RenderNodeAction.Proceed;
         }
 
         public void OnInstanceEnd(InstanceNode node)
         {
-            _currentTransform = Transform.Identity;
+            if (_transformStack.Count > 0)
+                _transformStack.Pop();
         }
 
         public void OnLight(LightNode node)
@@ -165,69 +182,98 @@ namespace DTExtractor.Core
 
         public void OnPolymesh(PolymeshTopology polymesh)
         {
-            if (_currentElement == null || string.IsNullOrEmpty(_currentGuid))
+            if (string.IsNullOrEmpty(_currentGuid))
                 return;
 
             _polymeshCount++;
 
-            // Extract vertex data
             var points = polymesh.GetPoints();
-            var normals = polymesh.GetNormals();
-            var uvs = polymesh.GetUVs();
             var facets = polymesh.GetFacets();
 
             if (points.Count == 0 || facets.Count == 0)
                 return;
 
-            // Transform to world space
-            var vertices = new List<XYZ>();
-            var normalsList = new List<XYZ>();
+            var rawNormals = polymesh.GetNormals();
+            var rawUvs = polymesh.GetUVs();
+            var distribution = polymesh.DistributionOfNormals;
 
-            foreach (var point in points)
+            List<XYZ> vertices;
+            List<XYZ> normalsList;
+            List<UV> uvList;
+            List<int> indices;
+
+            if (distribution == DistributionOfNormals.AtEachPoint)
             {
-                vertices.Add(_currentTransform.OfPoint(point));
-            }
-
-            foreach (var normal in normals)
-            {
-                normalsList.Add(_currentTransform.OfVector(normal).Normalize());
-            }
-
-            // Build triangle indices
-            var indices = new List<int>();
-            for (int i = 0; i < facets.Count; i++)
-            {
-                var facet = facets[i];
-                // Revit facets are always triangulated
-                indices.Add(facet.V1);
-                indices.Add(facet.V2);
-                indices.Add(facet.V3);
-            }
-
-            // Compute mesh hash for instancing detection
-            string meshHash = ComputeMeshHash(vertices, indices);
-
-            if (_meshHashMap.ContainsKey(meshHash))
-            {
-                // Reuse existing mesh - add instance
-                int meshIndex = _meshHashMap[meshHash];
-                _gltfBuilder.AddInstance(meshIndex, _currentTransform, _currentGuid, _currentElement.Name);
+                vertices = points.ToList();
+                normalsList = rawNormals.ToList();
+                uvList = rawUvs.Count > 0 ? rawUvs.Cast<UV>().ToList() : null;
+                indices = new List<int>(facets.Count * 3);
+                for (int i = 0; i < facets.Count; i++)
+                {
+                    indices.Add(facets[i].V1);
+                    indices.Add(facets[i].V2);
+                    indices.Add(facets[i].V3);
+                }
             }
             else
             {
-                // Create new mesh
-                var materialData = ExtractMaterialData(_currentMaterial);
-                int meshIndex = _gltfBuilder.AddMesh(
-                    vertices,
-                    normalsList,
-                    uvs.Count > 0 ? uvs.Cast<UV>().ToList() : null,
-                    indices,
-                    materialData
-                );
+                vertices = new List<XYZ>(facets.Count * 3);
+                normalsList = new List<XYZ>(facets.Count * 3);
+                uvList = rawUvs.Count > 0 ? new List<UV>(facets.Count * 3) : null;
+                indices = new List<int>(facets.Count * 3);
 
-                _meshHashMap[meshHash] = meshIndex;
-                _gltfBuilder.AddInstance(meshIndex, _currentTransform, _currentGuid, _currentElement.Name);
+                for (int fi = 0; fi < facets.Count; fi++)
+                {
+                    var facet = facets[fi];
+                    int baseIdx = vertices.Count;
+
+                    vertices.Add(points[facet.V1]);
+                    vertices.Add(points[facet.V2]);
+                    vertices.Add(points[facet.V3]);
+
+                    if (distribution == DistributionOfNormals.OnePerFace)
+                    {
+                        var n = rawNormals[0];
+                        normalsList.Add(n);
+                        normalsList.Add(n);
+                        normalsList.Add(n);
+                    }
+                    else
+                    {
+                        normalsList.Add(rawNormals[fi * 3]);
+                        normalsList.Add(rawNormals[fi * 3 + 1]);
+                        normalsList.Add(rawNormals[fi * 3 + 2]);
+                    }
+
+                    if (uvList != null)
+                    {
+                        uvList.Add(rawUvs.Count > facet.V1 ? rawUvs[facet.V1] : new UV(0, 0));
+                        uvList.Add(rawUvs.Count > facet.V2 ? rawUvs[facet.V2] : new UV(0, 0));
+                        uvList.Add(rawUvs.Count > facet.V3 ? rawUvs[facet.V3] : new UV(0, 0));
+                    }
+
+                    indices.Add(baseIdx);
+                    indices.Add(baseIdx + 1);
+                    indices.Add(baseIdx + 2);
+                }
             }
+
+            string meshHash = ComputeMeshHash(points, facets);
+            var currentTransform = _transformStack.Count > 0 ? _transformStack.Peek() : Transform.Identity;
+
+            if (_meshHashMap.ContainsKey(meshHash))
+            {
+                _gltfBuilder.AddInstance(_meshHashMap[meshHash], currentTransform, _currentGuid, _currentName);
+            }
+            else
+            {
+                var materialData = ExtractMaterialData(_currentMaterial);
+                int meshIndex = _gltfBuilder.AddMesh(vertices, normalsList, uvList, indices, materialData);
+                _meshHashMap[meshHash] = meshIndex;
+                _gltfBuilder.AddInstance(meshIndex, currentTransform, _currentGuid, _currentName);
+            }
+
+            _currentElementHasGeometry = true;
         }
 
         public void OnRPC(RPCNode node)
@@ -253,17 +299,20 @@ namespace DTExtractor.Core
         {
         }
 
-        private string ComputeMeshHash(List<XYZ> vertices, List<int> indices)
+        private string ComputeMeshHash(IList<XYZ> points, IList<PolymeshFacet> facets)
         {
             using (var sha256 = SHA256.Create())
             {
                 var sb = new StringBuilder();
-                // Sample first 10 vertices and all indices for hash
-                for (int i = 0; i < Math.Min(10, vertices.Count); i++)
+                for (int i = 0; i < Math.Min(10, points.Count); i++)
                 {
-                    sb.Append($"{vertices[i].X:F3},{vertices[i].Y:F3},{vertices[i].Z:F3};");
+                    sb.Append($"{points[i].X:F3},{points[i].Y:F3},{points[i].Z:F3};");
                 }
-                sb.Append($"|{indices.Count}");
+                sb.Append($"|{points.Count}|{facets.Count}");
+                for (int i = 0; i < Math.Min(10, facets.Count); i++)
+                {
+                    sb.Append($"|{facets[i].V1},{facets[i].V2},{facets[i].V3}");
+                }
 
                 var hashBytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(sb.ToString()));
                 return Convert.ToBase64String(hashBytes);

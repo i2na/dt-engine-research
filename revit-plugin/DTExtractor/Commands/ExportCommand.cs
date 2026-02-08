@@ -9,7 +9,7 @@ using DTExtractor.Core;
 
 namespace DTExtractor.Commands
 {
-    [Transaction(TransactionMode.Manual)]
+    [Transaction(TransactionMode.ReadOnly)]
     [Regeneration(RegenerationOption.Manual)]
     public class ExportCommand : IExternalCommand
     {
@@ -41,52 +41,32 @@ namespace DTExtractor.Commands
 
                     outputPath = saveDialog.FileName;
 
-                    DTGeometryExporter exporter = null;
-                    string exportLogPath = null;
-
-                    var progressDialog = new TaskDialog("Exporting to DT Engine")
+                    var view3D = GetExportView(doc, uiDoc);
+                    if (view3D == null)
                     {
-                        MainInstruction = "Exporting geometry and metadata...",
-                        MainContent = "This may take a few minutes for large models.",
-                        AllowCancellation = false,
-                        CommonButtons = TaskDialogCommonButtons.None
-                    };
-
-                    // Execute export in transaction
-                    using (var tx = new Transaction(doc, "DT Engine Export"))
-                    {
-                        tx.Start();
-
-                        // Get 3D view for export
-                        var view3D = Get3DView(doc);
-                        if (view3D == null)
-                        {
-                            TaskDialog.Show("Error", "No 3D view found. Please create a 3D view first.");
-                            return Result.Failed;
-                        }
-
-                        exporter = new DTGeometryExporter(doc, outputPath);
-                        var customExporter = new CustomExporter(doc, exporter);
-                        customExporter.IncludeGeometricObjects = true;
-                        customExporter.ShouldStopOnError = false;
-
-                        var swExport = Stopwatch.StartNew();
-                        customExporter.Export(view3D);
-                        swExport.Stop();
-
-                        var swFinish = Stopwatch.StartNew();
-                        exporter.Finish();
-                        swFinish.Stop();
-
-                        tx.Commit();
-
-                        exportLogPath = Path.ChangeExtension(outputPath, ".export-log.txt");
-                        try
-                        {
-                            File.AppendAllText(exportLogPath, $"[{DateTime.Now:HH:mm:ss}] Export() took {swExport.Elapsed.TotalSeconds:F1}s, Finish() took {swFinish.Elapsed.TotalSeconds:F1}s. elements={exporter.ElementCount}, polymeshes={exporter.PolymeshCount}\r\n");
-                        }
-                        catch { }
+                        TaskDialog.Show("Error", "No suitable 3D view found. Please create a 3D view first.");
+                        return Result.Failed;
                     }
+
+                    var exporter = new DTGeometryExporter(doc, outputPath);
+                    var customExporter = new CustomExporter(doc, exporter);
+                    customExporter.IncludeGeometricObjects = true;
+                    customExporter.ShouldStopOnError = false;
+
+                    var swExport = Stopwatch.StartNew();
+                    customExporter.Export(view3D);
+                    swExport.Stop();
+
+                    var swSerialize = Stopwatch.StartNew();
+                    exporter.Serialize();
+                    swSerialize.Stop();
+
+                    var exportLogPath = Path.ChangeExtension(outputPath, ".export-log.txt");
+                    try
+                    {
+                        File.AppendAllText(exportLogPath, $"[{DateTime.Now:HH:mm:ss}] Export() took {swExport.Elapsed.TotalSeconds:F1}s, Serialize() took {swSerialize.Elapsed.TotalSeconds:F1}s. elements={exporter.ElementCount}, polymeshes={exporter.PolymeshCount}\r\n");
+                    }
+                    catch { }
 
                     // Success message
                     var glbPath = Path.ChangeExtension(outputPath, ".glb");
@@ -119,19 +99,31 @@ namespace DTExtractor.Commands
             }
         }
 
-        private View3D Get3DView(Document doc)
+        private View3D GetExportView(Document doc, UIDocument uiDoc)
         {
-            // Try to find default 3D view
+            var activeView = uiDoc.ActiveView as View3D;
+            if (activeView != null && !activeView.IsTemplate)
+                return activeView;
+
             var collector = new FilteredElementCollector(doc)
                 .OfClass(typeof(View3D));
 
+            View3D defaultView = null;
+            View3D anyView = null;
+
             foreach (View3D view in collector)
             {
-                if (!view.IsTemplate)
-                    return view;
+                if (view.IsTemplate)
+                    continue;
+
+                if (view.Name.StartsWith("{3D"))
+                    defaultView = view;
+
+                if (anyView == null)
+                    anyView = view;
             }
 
-            return null;
+            return defaultView ?? anyView;
         }
     }
 }

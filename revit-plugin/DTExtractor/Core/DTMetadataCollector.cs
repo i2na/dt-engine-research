@@ -250,6 +250,12 @@ namespace DTExtractor.Core
             return areaParam?.AsDouble() ?? 0.0;
         }
 
+        public void RemoveElement(string guid)
+        {
+            if (guid != null)
+                _records.Remove(guid);
+        }
+
         public void SerializeToParquet(string basePath)
         {
             var parquetPath = System.IO.Path.ChangeExtension(basePath, ".parquet");

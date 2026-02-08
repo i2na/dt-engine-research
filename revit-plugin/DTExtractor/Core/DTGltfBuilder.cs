@@ -22,7 +22,7 @@ namespace DTExtractor.Core
 
         private readonly ModelRoot _model;
         private readonly Scene _scene;
-        private readonly Dictionary<int, Node> _meshNodes;
+        private readonly Dictionary<int, Mesh> _meshes;
         private readonly Dictionary<string, MaterialBuilder> _materialMap;
         private readonly List<string> _guidList;
 
@@ -33,7 +33,7 @@ namespace DTExtractor.Core
             OutputPath = outputPath;
             _model = ModelRoot.CreateModel();
             _scene = _model.UseScene("default");
-            _meshNodes = new Dictionary<int, Node>();
+            _meshes = new Dictionary<int, Mesh>();
             _materialMap = new Dictionary<string, MaterialBuilder>();
             _guidList = new List<string>();
         }
@@ -91,22 +91,20 @@ namespace DTExtractor.Core
             }
 
             var mesh = _model.CreateMesh(meshBuilder);
-            var node = _scene.CreateNode("node_" + meshId).WithMesh(mesh);
-            _meshNodes[meshId] = node;
+            _meshes[meshId] = mesh;
 
             return meshId;
         }
 
         public void AddInstance(int meshId, Transform transform, string guid, string name)
         {
-            if (!_meshNodes.ContainsKey(meshId))
+            if (!_meshes.ContainsKey(meshId))
                 throw new ArgumentException($"Mesh {meshId} not found");
 
             _guidList.Add(guid);
 
-            // Create instance node with transform
-            var instanceNode = _scene.CreateNode($"inst_{guid}");
-            instanceNode.WithMesh(_meshNodes[meshId].Mesh);
+            var instanceNode = _scene.CreateNode($"inst_{guid}_{_guidList.Count}");
+            instanceNode.WithMesh(_meshes[meshId]);
 
             // Set transform matrix
             var matrix = ToMatrix4x4(transform);
