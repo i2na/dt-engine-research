@@ -1,0 +1,47 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <OutputType>Library</OutputType>
+    <PlatformTarget>x64</PlatformTarget>
+    <Configurations>Debug-R2023;Release-R2023;Debug-R2024;Release-R2024</Configurations>
+  </PropertyGroup>
+
+  <!-- Revit 2023 -->
+  <PropertyGroup Condition="$(Configuration.Contains('R2023'))">
+    <RevitVersion>2023</RevitVersion>
+    <DefineConstants>$(DefineConstants);REVIT2023</DefineConstants>
+  </PropertyGroup>
+
+  <!-- Revit 2024 -->
+  <PropertyGroup Condition="$(Configuration.Contains('R2024'))">
+    <RevitVersion>2024</RevitVersion>
+    <DefineConstants>$(DefineConstants);REVIT2024</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Revit API References -->
+    <Reference Include="RevitAPI">
+      <HintPath>C:\Program Files\Autodesk\Revit $(RevitVersion)\RevitAPI.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="RevitAPIUI">
+      <HintPath>C:\Program Files\Autodesk\Revit $(RevitVersion)\RevitAPIUI.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+
+    <!-- glTF Export -->
+    <PackageReference Include="SharpGLTF.Toolkit" Version="1.0.0-alpha0031" />
+
+    <!-- Parquet Export -->
+    <PackageReference Include="Parquet.Net" Version="4.19.0" />
+
+    <!-- JSON Serialization -->
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+
+  <Target Name="PostBuild" AfterTargets="PostBuildEvent">
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(AppData)\Autodesk\Revit\Addins\$(RevitVersion)" />
+    <Copy SourceFiles="DTExtractor.addin" DestinationFolder="$(AppData)\Autodesk\Revit\Addins\$(RevitVersion)" />
+  </Target>
+</Project>

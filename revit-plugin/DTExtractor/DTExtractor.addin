@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RevitAddIns>
+  <AddIn Type="Command">
+    <Text>Export to DT Engine</Text>
+    <Description>Export Revit model to GLB + Parquet for Digital Twin Engine</Description>
+    <Assembly>DTExtractor.dll</Assembly>
+    <FullClassName>DTExtractor.Commands.ExportCommand</FullClassName>
+    <ClientId>A1B2C3D4-E5F6-4789-ABCD-EF0123456789</ClientId>
+    <VendorId>DTENGINE</VendorId>
+    <VendorDescription>Digital Twin Engine</VendorDescription>
+  </AddIn>
+  <AddIn Type="Application">
+    <Name>DTExtractor</Name>
+    <Assembly>DTExtractor.dll</Assembly>
+    <FullClassName>DTExtractor.App</FullClassName>
+    <ClientId>B2C3D4E5-F6A7-5890-BCDE-F01234567890</ClientId>
+    <VendorId>DTENGINE</VendorId>
+    <VendorDescription>Digital Twin Engine</VendorDescription>
+  </AddIn>
+</RevitAddIns>

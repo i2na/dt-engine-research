@@ -1,0 +1,348 @@
+<!doctype html>
+<html lang="ko">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>DT Engine Viewer - Independent Digital Twin</title>
+        <style>
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+
+            body {
+                font-family:
+                    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu,
+                    Cantarell, sans-serif;
+                overflow: hidden;
+                background: #1a1a1a;
+                color: #e0e0e0;
+            }
+
+            #app {
+                display: flex;
+                width: 100vw;
+                height: 100vh;
+            }
+
+            /* Left Sidebar - Rendering Controls */
+            #left-sidebar {
+                width: 280px;
+                background: #252525;
+                border-right: 1px solid #3a3a3a;
+                display: flex;
+                flex-direction: column;
+                overflow-y: auto;
+            }
+
+            .sidebar-section {
+                padding: 20px;
+                border-bottom: 1px solid #3a3a3a;
+            }
+
+            .sidebar-section h2 {
+                font-size: 14px;
+                font-weight: 600;
+                margin-bottom: 15px;
+                color: #ffffff;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+            }
+
+            .control-group {
+                margin-bottom: 15px;
+            }
+
+            .control-group label {
+                display: block;
+                font-size: 13px;
+                margin-bottom: 6px;
+                color: #b0b0b0;
+            }
+
+            .control-group input[type="range"] {
+                width: 100%;
+                height: 4px;
+                background: #3a3a3a;
+                outline: none;
+                border-radius: 2px;
+            }
+
+            .control-group input[type="range"]::-webkit-slider-thumb {
+                width: 14px;
+                height: 14px;
+                background: #4a9eff;
+                cursor: pointer;
+                border-radius: 50%;
+            }
+
+            .button-group {
+                display: flex;
+                gap: 8px;
+                flex-wrap: wrap;
+            }
+
+            .button-group button {
+                flex: 1;
+                padding: 8px 12px;
+                background: #3a3a3a;
+                border: 1px solid #4a4a4a;
+                border-radius: 4px;
+                color: #e0e0e0;
+                font-size: 12px;
+                cursor: pointer;
+                transition: all 0.2s;
+            }
+
+            .button-group button:hover {
+                background: #4a4a4a;
+                border-color: #5a5a5a;
+            }
+
+            .button-group button.active {
+                background: #4a9eff;
+                border-color: #4a9eff;
+                color: #ffffff;
+            }
+
+            .checkbox-group {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                padding: 8px 0;
+            }
+
+            .checkbox-group input[type="checkbox"] {
+                width: 16px;
+                height: 16px;
+                cursor: pointer;
+            }
+
+            /* Main Canvas Area */
+            #canvas-container {
+                flex: 1;
+                position: relative;
+                background: #1a1a1a;
+            }
+
+            #canvas {
+                width: 100%;
+                height: 100%;
+                display: block;
+            }
+
+            #loading {
+                position: absolute;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                text-align: center;
+                color: #e0e0e0;
+            }
+
+            #loading.hidden {
+                display: none;
+            }
+
+            .spinner {
+                border: 3px solid #3a3a3a;
+                border-top: 3px solid #4a9eff;
+                border-radius: 50%;
+                width: 40px;
+                height: 40px;
+                animation: spin 1s linear infinite;
+                margin: 0 auto 15px;
+            }
+
+            @keyframes spin {
+                0% {
+                    transform: rotate(0deg);
+                }
+                100% {
+                    transform: rotate(360deg);
+                }
+            }
+
+            /* Right Sidebar - Metadata Panel */
+            #right-sidebar {
+                width: 320px;
+                background: #252525;
+                border-left: 1px solid #3a3a3a;
+                display: flex;
+                flex-direction: column;
+                overflow-y: auto;
+            }
+
+            #metadata-panel {
+                padding: 20px;
+            }
+
+            #metadata-panel.empty {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                height: 100%;
+                color: #606060;
+                text-align: center;
+                font-size: 13px;
+            }
+
+            .metadata-header {
+                margin-bottom: 20px;
+                padding-bottom: 15px;
+                border-bottom: 1px solid #3a3a3a;
+            }
+
+            .metadata-header h3 {
+                font-size: 16px;
+                font-weight: 600;
+                margin-bottom: 5px;
+                color: #ffffff;
+            }
+
+            .metadata-header .category {
+                font-size: 12px;
+                color: #4a9eff;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+            }
+
+            .param-group {
+                margin-bottom: 20px;
+            }
+
+            .param-group-title {
+                font-size: 12px;
+                font-weight: 600;
+                color: #b0b0b0;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+                margin-bottom: 10px;
+            }
+
+            .param-row {
+                display: flex;
+                justify-content: space-between;
+                padding: 8px 0;
+                border-bottom: 1px solid #2a2a2a;
+                font-size: 13px;
+            }
+
+            .param-row:last-child {
+                border-bottom: none;
+            }
+
+            .param-name {
+                color: #b0b0b0;
+                font-weight: 500;
+            }
+
+            .param-value {
+                color: #e0e0e0;
+                text-align: right;
+                max-width: 60%;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+
+            /* Stats Display */
+            #stats {
+                position: absolute;
+                top: 10px;
+                left: 50%;
+                transform: translateX(-50%);
+                background: rgba(37, 37, 37, 0.9);
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-size: 11px;
+                color: #b0b0b0;
+                backdrop-filter: blur(10px);
+            }
+        </style>
+    </head>
+    <body>
+        <div id="app">
+            <!-- Left Sidebar: Rendering Controls -->
+            <div id="left-sidebar">
+                <div class="sidebar-section">
+                    <h2>🎨 Rendering Mode</h2>
+                    <div class="button-group">
+                        <button id="mode-material" class="active">Material</button>
+                        <button id="mode-wireframe">Wireframe</button>
+                        <button id="mode-xray">X-Ray</button>
+                    </div>
+                </div>
+
+                <div class="sidebar-section">
+                    <h2>💡 Lighting</h2>
+                    <div class="control-group">
+                        <label>Ambient Intensity</label>
+                        <input
+                            type="range"
+                            id="ambient-intensity"
+                            min="0"
+                            max="2"
+                            step="0.1"
+                            value="0.6"
+                        />
+                    </div>
+                    <div class="control-group">
+                        <label>Directional Intensity</label>
+                        <input
+                            type="range"
+                            id="directional-intensity"
+                            min="0"
+                            max="3"
+                            step="0.1"
+                            value="1.5"
+                        />
+                    </div>
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="shadows-enabled" checked />
+                        <label for="shadows-enabled">Enable Shadows</label>
+                    </div>
+                </div>
+
+                <div class="sidebar-section">
+                    <h2>🔍 View Options</h2>
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="show-grid" />
+                        <label for="show-grid">Show Grid</label>
+                    </div>
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="show-axes" checked />
+                        <label for="show-axes">Show Axes</label>
+                    </div>
+                </div>
+
+                <div class="sidebar-section">
+                    <h2>📂 Model Controls</h2>
+                    <div class="button-group">
+                        <button id="reset-camera">Reset View</button>
+                        <button id="fit-all">Fit All</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Main Canvas -->
+            <div id="canvas-container">
+                <canvas id="canvas"></canvas>
+                <div id="loading">
+                    <div class="spinner"></div>
+                    <p>모델 로딩 중...</p>
+                </div>
+                <div id="stats"></div>
+            </div>
+
+            <!-- Right Sidebar: Metadata Panel -->
+            <div id="right-sidebar">
+                <div id="metadata-panel" class="empty">
+                    <p>3D 모델에서 객체를 클릭하면<br />Revit 파라미터가 표시됩니다</p>
+                </div>
+            </div>
+        </div>
+
+        <script type="module" src="/src/main.ts"></script>
+    </body>
+</html>
