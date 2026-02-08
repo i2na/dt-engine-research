@@ -24,22 +24,40 @@ namespace DTExtractor.Core
         private MaterialNode _currentMaterial;
         private Transform _currentTransform = Transform.Identity;
 
+        private int _elementCount;
+        private int _polymeshCount;
+        private readonly string _logPath;
+
+        public int ElementCount => _elementCount;
+        public int PolymeshCount => _polymeshCount;
+
         public DTGeometryExporter(Document doc, string outputPath)
         {
             _doc = doc;
             _gltfBuilder = new DTGltfBuilder(outputPath);
             _metadataCollector = new DTMetadataCollector();
             _meshHashMap = new Dictionary<string, int>();
+            _logPath = System.IO.Path.ChangeExtension(outputPath, ".export-log.txt");
         }
 
         public bool Start()
         {
+            try
+            {
+                System.IO.File.WriteAllText(_logPath, $"[{DateTime.Now:HH:mm:ss}] Export started.\r\n");
+            }
+            catch { }
             return true;
         }
 
         public void Finish()
         {
-            // Serialize both outputs
+            try
+            {
+                System.IO.File.AppendAllText(_logPath, $"[{DateTime.Now:HH:mm:ss}] Export callback finished. elements={_elementCount}, polymeshes={_polymeshCount}. Writing GLB and Parquet...\r\n");
+            }
+            catch { }
+
             _gltfBuilder.SerializeToGlb();
             _metadataCollector.SerializeToParquet(_gltfBuilder.OutputPath);
 
@@ -79,9 +97,29 @@ namespace DTExtractor.Core
                 return RenderNodeAction.Skip;
 
             _currentGuid = _currentElement.UniqueId;
+            _elementCount++;
 
-            // Extract metadata simultaneously with geometry
-            var record = _metadataCollector.ExtractElement(_currentElement);
+            try
+            {
+                _metadataCollector.ExtractElement(_currentElement);
+            }
+            catch (Exception ex)
+            {
+                try
+                {
+                    System.IO.File.AppendAllText(_logPath, $"[{DateTime.Now:HH:mm:ss}] Element #{_elementCount} ExtractElement failed: {ex.Message}\r\n");
+                }
+                catch { }
+            }
+
+            if (_elementCount % 5000 == 0)
+            {
+                try
+                {
+                    System.IO.File.AppendAllText(_logPath, $"[{DateTime.Now:HH:mm:ss}] Progress: elements={_elementCount}, polymeshes={_polymeshCount}\r\n");
+                }
+                catch { }
+            }
 
             return RenderNodeAction.Proceed;
         }
@@ -118,6 +156,8 @@ namespace DTExtractor.Core
         {
             if (_currentElement == null || string.IsNullOrEmpty(_currentGuid))
                 return;
+
+            _polymeshCount++;
 
             // Extract vertex data
             var points = polymesh.GetPoints();

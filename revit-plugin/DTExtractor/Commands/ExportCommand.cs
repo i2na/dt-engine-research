@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.Windows.Forms;
 using Autodesk.Revit.Attributes;
@@ -26,9 +27,9 @@ namespace DTExtractor.Commands
                 return Result.Failed;
             }
 
+            string outputPath = null;
             try
             {
-                // Get output path from user
                 using (var saveDialog = new SaveFileDialog())
                 {
                     saveDialog.Title = "Export to DT Engine";
@@ -38,7 +39,7 @@ namespace DTExtractor.Commands
                     if (saveDialog.ShowDialog() != DialogResult.OK)
                         return Result.Cancelled;
 
-                    string outputPath = saveDialog.FileName;
+                    outputPath = saveDialog.FileName;
 
                     // Progress dialog
                     var progressDialog = new TaskDialog("Exporting to DT Engine")
@@ -62,21 +63,27 @@ namespace DTExtractor.Commands
                             return Result.Failed;
                         }
 
-                        // Create exporter
                         var exporter = new DTGeometryExporter(doc, outputPath);
                         var customExporter = new CustomExporter(doc, exporter);
-
-                        // Configure export options
                         customExporter.IncludeGeometricObjects = true;
                         customExporter.ShouldStopOnError = false;
 
-                        // Execute export
+                        var swExport = Stopwatch.StartNew();
                         customExporter.Export(view3D);
+                        swExport.Stop();
 
-                        // Finalize (writes GLB and Parquet)
+                        var swFinish = Stopwatch.StartNew();
                         exporter.Finish();
+                        swFinish.Stop();
 
                         tx.Commit();
+
+                        var logPath = Path.ChangeExtension(outputPath, ".export-log.txt");
+                        try
+                        {
+                            File.AppendAllText(logPath, $"[{DateTime.Now:HH:mm:ss}] Export() took {swExport.Elapsed.TotalSeconds:F1}s, Finish() took {swFinish.Elapsed.TotalSeconds:F1}s. elements={exporter.ElementCount}, polymeshes={exporter.PolymeshCount}\r\n");
+                        }
+                        catch { }
                     }
 
                     // Success message
@@ -86,12 +93,15 @@ namespace DTExtractor.Commands
                     var glbSize = new FileInfo(glbPath).Length / 1024.0 / 1024.0;
                     var parquetSize = new FileInfo(parquetPath).Length / 1024.0 / 1024.0;
 
+                    var logPath = Path.ChangeExtension(outputPath, ".export-log.txt");
                     TaskDialog.Show(
                         "Export Complete",
                         $"Files exported successfully:\n\n" +
                         $"Geometry: {Path.GetFileName(glbPath)} ({glbSize:F2} MB)\n" +
-                        $"Metadata: {Path.GetFileName(parquetPath)} ({parquetSize:F2} MB)\n\n" +
-                        $"Output folder: {Path.GetDirectoryName(outputPath)}");
+                        $"Metadata: {Path.GetFileName(parquetPath)} ({parquetSize:F2} MB)\n" +
+                        $"Elements: {exporter.ElementCount}, Polymeshes: {exporter.PolymeshCount}\n\n" +
+                        $"Output: {Path.GetDirectoryName(outputPath)}\n" +
+                        $"Diagnostic log: {Path.GetFileName(logPath)}");
 
                     return Result.Succeeded;
                 }
@@ -99,7 +109,11 @@ namespace DTExtractor.Commands
             catch (Exception ex)
             {
                 message = ex.Message;
-                TaskDialog.Show("Export Error", $"An error occurred during export:\n\n{ex.Message}\n\n{ex.StackTrace}");
+                var logPath = outputPath != null ? Path.ChangeExtension(outputPath, ".export-log.txt") : null;
+                var logHint = !string.IsNullOrEmpty(logPath) && File.Exists(logPath)
+                    ? $"\n\nCheck {logPath} for progress and errors."
+                    : "";
+                TaskDialog.Show("Export Error", $"An error occurred during export:\n\n{ex.Message}\n\n{ex.StackTrace}{logHint}");
                 return Result.Failed;
             }
         }
