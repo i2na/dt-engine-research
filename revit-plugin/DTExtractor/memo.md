@@ -67,3 +67,34 @@ WARNING: No valid element records collected. Parquet NOT created. (polymesh fail
 - `DTGeometryExporter.OnPolymesh()`: `polymesh.GetNormals()`와 `polymesh.GetUVs()` 호출을 개별 try-catch로 감싸, 법선 실패 시 면 정점에서 cross product로 flat normal 계산 폴백, UV 실패 시 null 처리.
 - `DTGeometryExporter.OnPolymesh()`: catch 블록에 `ex.GetType().FullName`과 StackTrace 첫 줄을 기록하여 향후 진단 가능.
 - `System.Text.Json` using 제거 (`JsonSerializer` 직접 사용 제거), `System.Text.Json.Nodes`만 유지.
+
+## Export 실패: SharpGLTF VertexEmpty.SetBindings NotSupportedException
+
+**증상:** 위 System.Text.Json 수정 이후에도 100% Polymesh 실패 지속. 에러 메시지 동일(`NotSupportedException`)이나 스택 트레이스가 다름.
+
+**로그 패턴:**
+
+```
+OnPolymesh failed for <GUID>: [System.NotSupportedException] 지정한 메서드가 지원되지 않습니다.
+  at: SharpGLTF.Geometry.VertexTypes.VertexEmpty.SetBindings(SparseWeight8& bindings)
+(156,998회 반복)
+```
+
+**근본 원인 (SharpGLTF Toolkit MeshBuilder → Schema2 변환 버그):**
+
+1. `DTGltfBuilder.AddMesh()`에서 `MeshBuilder<VertexPositionNormal, VertexTexture1>` 생성. 세 번째 제네릭 파라미터(스키닝)가 기본값 `VertexEmpty`로 추론됨.
+2. `_model.CreateMesh(meshBuilder)` 호출 시 Toolkit 내부 변환 코드가 모든 버텍스 컴포넌트를 처리. 스키닝 슬롯의 `VertexEmpty.SetBindings(SparseWeight8&)` 호출됨.
+3. `VertexEmpty`는 `IVertexSkinning` 인터페이스의 `SetBindings`를 `throw new NotSupportedException()`으로 구현. 스키닝 데이터가 없는 메시에서도 변환 과정에서 이 메서드가 호출되는 것이 alpha0031의 버그.
+4. `AddMesh` 실패 → `AddInstance` 미호출 → `_currentElementHasGeometry = false` → `OnElementEnd`에서 메타데이터 삭제 → 전체 레코드 삭제.
+
+**수정 (MeshBuilder 완전 우회):**
+
+- `DTGltfBuilder.AddMesh()`: `MeshBuilder`/`VertexBuilder` 완전 제거. Schema2 직접 API(`Mesh.CreatePrimitive()` + `MeshPrimitive.WithVertexAccessor()`)로 교체. 이 경로는 Toolkit의 버텍스 타입 시스템을 전혀 거치지 않아 `VertexEmpty.SetBindings` 호출이 발생하지 않음.
+    - `positions`/`normals`는 `Vector3[]` 배열로 직접 구성
+    - `WithVertexAccessor("POSITION", positions)` → Schema2 Buffer/BufferView/Accessor 직접 생성
+    - `WithIndicesAccessor(PrimitiveType.TRIANGLES, indices)` → 인덱스 버퍼 직접 생성
+    - `WithMaterial(material)` → Schema2 Material 직접 할당
+- `DTGltfBuilder.GetOrCreateMaterial()`: `MaterialBuilder` 유지 후 `_model.CreateMaterial(builder)` Toolkit 확장으로 Schema2 `Material`로 변환. Material 변환은 버텍스 타입과 무관하므로 안전.
+- `using SharpGLTF.Geometry` 및 `using SharpGLTF.Geometry.VertexTypes` 제거.
+- `DTGeometryExporter.OnElementEnd()`: `_metadataCollector.RemoveElement()` 호출 제거. 지오메트리 실패와 무관하게 메타데이터 보존.
+- `DTGeometryExporter.Serialize()`: GUID 불일치를 예외가 아닌 로그 경고로 변경. Parquet는 메타데이터 레코드가 있는 한 항상 생성.

@@ -69,38 +69,28 @@ namespace DTExtractor.Core
             _gltfBuilder.SerializeToGlb();
             try { System.IO.File.AppendAllText(_logPath, $"[{DateTime.Now:HH:mm:ss}] GLB written.\r\n"); } catch { }
 
-            var parquetGuids = _metadataCollector.GetAllGuids();
-            if (parquetGuids.Count == 0)
-            {
-                try { System.IO.File.AppendAllText(_logPath, $"[{DateTime.Now:HH:mm:ss}] WARNING: No valid element records collected. Parquet NOT created. (polymesh failures={_polymeshFailCount}/{_polymeshCount})\r\n"); } catch { }
-                return;
-            }
-
             _metadataCollector.SerializeToParquet(_gltfBuilder.OutputPath);
-            try { System.IO.File.AppendAllText(_logPath, $"[{DateTime.Now:HH:mm:ss}] Parquet written. ({parquetGuids.Count} records)\r\n"); } catch { }
 
+            var parquetGuids = _metadataCollector.GetAllGuids();
             var gltfGuids = _gltfBuilder.GetAllGuids();
 
-            if (!gltfGuids.SetEquals(parquetGuids))
+            try
             {
-                var onlyInGlb = new HashSet<string>(gltfGuids);
-                onlyInGlb.ExceptWith(parquetGuids);
-                var onlyInParquet = new HashSet<string>(parquetGuids);
-                onlyInParquet.ExceptWith(gltfGuids);
+                System.IO.File.AppendAllText(_logPath,
+                    $"[{DateTime.Now:HH:mm:ss}] Parquet written. records={parquetGuids.Count}, geometry_instances={gltfGuids.Count}, polymesh_failures={_polymeshFailCount}/{_polymeshCount}\r\n");
 
-                try
+                if (gltfGuids.Count > 0 && !gltfGuids.SetEquals(parquetGuids))
                 {
-                    System.IO.File.AppendAllText(_logPath,
-                        $"[{DateTime.Now:HH:mm:ss}] GUID mismatch: GLB={gltfGuids.Count}, Parquet={parquetGuids.Count}, " +
-                        $"only in GLB={onlyInGlb.Count}, only in Parquet={onlyInParquet.Count}\r\n");
-                }
-                catch { }
+                    var onlyInGlb = new HashSet<string>(gltfGuids);
+                    onlyInGlb.ExceptWith(parquetGuids);
+                    var onlyInParquet = new HashSet<string>(parquetGuids);
+                    onlyInParquet.ExceptWith(gltfGuids);
 
-                throw new InvalidOperationException(
-                    $"GUID mismatch between GLB and Parquet outputs. " +
-                    $"GLB: {gltfGuids.Count}, Parquet: {parquetGuids.Count}. " +
-                    $"Only in GLB: {onlyInGlb.Count}, Only in Parquet: {onlyInParquet.Count}");
+                    System.IO.File.AppendAllText(_logPath,
+                        $"[{DateTime.Now:HH:mm:ss}] GUID coverage: only_in_GLB={onlyInGlb.Count}, only_in_Parquet={onlyInParquet.Count}\r\n");
+                }
             }
+            catch { }
         }
 
         public bool IsCanceled()
@@ -158,9 +148,6 @@ namespace DTExtractor.Core
 
         public void OnElementEnd(ElementId elementId)
         {
-            if (!_currentElementHasGeometry && _currentGuid != null)
-                _metadataCollector.RemoveElement(_currentGuid);
-
             _currentGuid = null;
             _currentName = null;
         }

@@ -4,8 +4,6 @@ using System.Linq;
 using System.Numerics;
 using System.Text.Json.Nodes;
 using Autodesk.Revit.DB;
-using SharpGLTF.Geometry;
-using SharpGLTF.Geometry.VertexTypes;
 using SharpGLTF.Materials;
 using SharpGLTF.Schema2;
 
@@ -22,7 +20,7 @@ namespace DTExtractor.Core
         private readonly ModelRoot _model;
         private readonly Scene _scene;
         private readonly Dictionary<int, SharpGLTF.Schema2.Mesh> _meshes;
-        private readonly Dictionary<string, MaterialBuilder> _materialMap;
+        private readonly Dictionary<string, SharpGLTF.Schema2.Material> _materialMap;
         private readonly List<string> _guidList;
 
         private int _nextMeshId = 0;
@@ -33,7 +31,7 @@ namespace DTExtractor.Core
             _model = ModelRoot.CreateModel();
             _scene = _model.UseScene("default");
             _meshes = new Dictionary<int, SharpGLTF.Schema2.Mesh>();
-            _materialMap = new Dictionary<string, MaterialBuilder>();
+            _materialMap = new Dictionary<string, SharpGLTF.Schema2.Material>();
             _guidList = new List<string>();
         }
 
@@ -46,52 +44,34 @@ namespace DTExtractor.Core
         {
             int meshId = _nextMeshId++;
 
-            // Create material
-            var material = GetOrCreateMaterial(materialData);
-
-            // Build mesh using SharpGLTF
-            var meshBuilder = new MeshBuilder<VertexPositionNormal, VertexTexture1>("mesh_" + meshId);
-            var prim = meshBuilder.UsePrimitive(material);
-
-            // Add triangles
-            for (int i = 0; i < indices.Count; i += 3)
+            var positions = new Vector3[vertices.Count];
+            var normalVecs = new Vector3[vertices.Count];
+            for (int i = 0; i < vertices.Count; i++)
             {
-                var v0 = vertices[indices[i]];
-                var v1 = vertices[indices[i + 1]];
-                var v2 = vertices[indices[i + 2]];
-
-                var n0 = normals[indices[i]];
-                var n1 = normals[indices[i + 1]];
-                var n2 = normals[indices[i + 2]];
-
-                var uv0 = uvs != null && uvs.Count > indices[i] ? uvs[indices[i]] : new UV(0, 0);
-                var uv1 = uvs != null && uvs.Count > indices[i + 1] ? uvs[indices[i + 1]] : new UV(0, 0);
-                var uv2 = uvs != null && uvs.Count > indices[i + 2] ? uvs[indices[i + 2]] : new UV(0, 0);
-
-                var vtx0 = new VertexBuilder<VertexPositionNormal, VertexTexture1, VertexEmpty>(
-                    new VertexPositionNormal(ToVector3(v0), ToVector3(n0)),
-                    new VertexTexture1(ToVector2(uv0)),
-                    default
-                );
-
-                var vtx1 = new VertexBuilder<VertexPositionNormal, VertexTexture1, VertexEmpty>(
-                    new VertexPositionNormal(ToVector3(v1), ToVector3(n1)),
-                    new VertexTexture1(ToVector2(uv1)),
-                    default
-                );
-
-                var vtx2 = new VertexBuilder<VertexPositionNormal, VertexTexture1, VertexEmpty>(
-                    new VertexPositionNormal(ToVector3(v2), ToVector3(n2)),
-                    new VertexTexture1(ToVector2(uv2)),
-                    default
-                );
-
-                prim.AddTriangle(vtx0, vtx1, vtx2);
+                positions[i] = ToVector3(vertices[i]);
+                normalVecs[i] = normals != null && i < normals.Count
+                    ? ToVector3(normals[i])
+                    : Vector3.UnitZ;
             }
 
-            var mesh = _model.CreateMesh(meshBuilder);
-            _meshes[meshId] = mesh;
+            var material = GetOrCreateMaterial(materialData);
 
+            var mesh = _model.CreateMesh("mesh_" + meshId);
+            var prim = mesh.CreatePrimitive()
+                .WithVertexAccessor("POSITION", positions)
+                .WithVertexAccessor("NORMAL", normalVecs)
+                .WithIndicesAccessor(PrimitiveType.TRIANGLES, indices.ToArray())
+                .WithMaterial(material);
+
+            if (uvs != null && uvs.Count > 0)
+            {
+                var texcoords = new Vector2[vertices.Count];
+                for (int i = 0; i < vertices.Count; i++)
+                    texcoords[i] = i < uvs.Count ? ToVector2(uvs[i]) : Vector2.Zero;
+                prim.WithVertexAccessor("TEXCOORD_0", texcoords);
+            }
+
+            _meshes[meshId] = mesh;
             return meshId;
         }
 
@@ -129,14 +109,14 @@ namespace DTExtractor.Core
             catch { }
         }
 
-        private MaterialBuilder GetOrCreateMaterial(MaterialData data)
+        private SharpGLTF.Schema2.Material GetOrCreateMaterial(MaterialData data)
         {
             string key = $"{data.Color[0]:F2}_{data.Color[1]:F2}_{data.Color[2]:F2}";
 
             if (_materialMap.TryGetValue(key, out var cached))
                 return cached;
 
-            var material = new MaterialBuilder($"mat_{_materialMap.Count}")
+            var builder = new MaterialBuilder($"mat_{_materialMap.Count}")
                 .WithMetallicRoughnessShader()
                 .WithBaseColor(new Vector4(
                     (float)data.Color[0],
@@ -145,6 +125,7 @@ namespace DTExtractor.Core
                     (float)(1.0 - data.Transparency)))
                 .WithMetallicRoughness(metallic: 0f, roughness: (float)(1.0 - data.Smoothness));
 
+            var material = _model.CreateMaterial(builder);
             _materialMap[key] = material;
             return material;
         }
