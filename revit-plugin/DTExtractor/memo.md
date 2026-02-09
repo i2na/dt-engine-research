@@ -38,3 +38,32 @@ Parquet written.   ← 거짓 로그
 - `_polymeshFailCount` 카운터 추가: 실패한 폴리메시 수를 추적하여 진단 로그 및 UI에 표시.
 - `Serialize()`: `_records`가 비어있으면 Parquet 쓰기를 건너뛰고 `"WARNING: No valid element records collected. Parquet NOT created."` 로그 기록. GUID 일관성 체크도 건너뜀.
 - `ExportCommand`: `File.Exists()` 체크 후 `FileInfo.get_Length()` 호출. Parquet 미생성 시 원인과 카운터를 포함한 `"Export Failed"` 다이얼로그 표시. 부분 성공 시에도 실패 폴리메시 수를 경고로 표시.
+
+## Export 실패: 100% Polymesh 실패 (NotSupportedException - "지정한 메서드가 지원되지 않습니다")
+
+**증상:** Export 실행 시 7,940개 Element가 처리되나, 156,998개 Polymesh 콜백이 **전부(100%)** 실패. Parquet 미생성, GLB에 유효 지오메트리 없음. UI에 `"Export completed but no usable geometry was extracted."` 표시.
+
+**로그 패턴:**
+
+```
+OnPolymesh failed for <GUID>: 지정한 메서드가 지원되지 않습니다.
+(156,998회 반복)
+WARNING: No valid element records collected. Parquet NOT created. (polymesh failures=156998/156998)
+```
+
+**근본 원인 (System.Text.Json 런타임 어셈블리 충돌):**
+
+1. `DTGltfBuilder.AddInstance()` 내에서 `System.Text.Json.JsonSerializer.SerializeToNode()`를 호출하여 GLB 노드에 GUID/이름 Extras를 기록함.
+2. `SerializeToNode()`는 .NET 6+에서 추가된 API이며, 프로젝트는 `net48` 타겟. 컴파일 시점에는 SharpGLTF의 transitive `System.Text.Json` NuGet 의존성(6.0+)으로 API가 존재하나, **Revit 2024 런타임이 자체 번들한 구버전 `System.Text.Json.dll`을 우선 로드**하면서 `NotSupportedException` 발생.
+3. `AddInstance()`가 **모든** polymesh 콜백의 코드 경로(캐시 히트/미스 무관)에서 호출되므로 100% 실패.
+4. `AddInstance` 예외가 `OnPolymesh` catch로 전파 → `_currentElementHasGeometry`가 영원히 `false` → `OnElementEnd`에서 모든 메타데이터 삭제 → Parquet 미생성.
+5. 추가적으로 `polymesh.GetNormals()`/`GetUVs()` 호출도 특정 모델에서 `NotSupportedException`을 던질 수 있으나, 이 케이스에서는 부차적 원인.
+
+**수정:**
+
+- `DTGltfBuilder.AddInstance()`: `JsonSerializer.SerializeToNode()` 제거 → `Newtonsoft.Json.JsonConvert.SerializeObject()` + `JsonNode.Parse()` 조합으로 교체. Extras 할당을 try-catch로 감싸 실패 시에도 인스턴스 생성은 유지.
+- `DTGltfBuilder.AddInstance()`: `instanceNode.LocalMatrix` 세터를 try-catch로 감싸, 행렬 분해(TRS decomposition) 실패 시(미러 변환 등) Translation-only 폴백.
+- `DTGltfBuilder.SerializeToGlb()`: 모델 Extras에도 동일한 `SerializeToNode` → `Newtonsoft.Json` + `JsonNode.Parse` 교체.
+- `DTGeometryExporter.OnPolymesh()`: `polymesh.GetNormals()`와 `polymesh.GetUVs()` 호출을 개별 try-catch로 감싸, 법선 실패 시 면 정점에서 cross product로 flat normal 계산 폴백, UV 실패 시 null 처리.
+- `DTGeometryExporter.OnPolymesh()`: catch 블록에 `ex.GetType().FullName`과 StackTrace 첫 줄을 기록하여 향후 진단 가능.
+- `System.Text.Json` using 제거 (`JsonSerializer` 직접 사용 제거), `System.Text.Json.Nodes`만 유지.

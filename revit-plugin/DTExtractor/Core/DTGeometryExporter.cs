@@ -211,20 +211,29 @@ namespace DTExtractor.Core
                 if (points.Count == 0 || facets.Count == 0)
                     return;
 
-                var rawNormals = polymesh.GetNormals();
-                var rawUvs = polymesh.GetUVs();
-                var distribution = polymesh.DistributionOfNormals;
+                IList<XYZ> rawNormals = null;
+                DistributionOfNormals distribution = DistributionOfNormals.OnEachFacet;
+                try
+                {
+                    distribution = polymesh.DistributionOfNormals;
+                    rawNormals = polymesh.GetNormals();
+                }
+                catch { }
+
+                IList<UV> rawUvs = null;
+                try { rawUvs = polymesh.GetUVs(); }
+                catch { }
 
                 List<XYZ> vertices;
                 List<XYZ> normalsList;
                 List<UV> uvList;
                 List<int> indices;
 
-                if (distribution == DistributionOfNormals.AtEachPoint)
+                if (rawNormals != null && distribution == DistributionOfNormals.AtEachPoint)
                 {
                     vertices = points.ToList();
                     normalsList = rawNormals.ToList();
-                    uvList = rawUvs.Count > 0 ? rawUvs.Cast<UV>().ToList() : null;
+                    uvList = rawUvs != null && rawUvs.Count > 0 ? rawUvs.Cast<UV>().ToList() : null;
                     indices = new List<int>(facets.Count * 3);
                     for (int i = 0; i < facets.Count; i++)
                     {
@@ -237,7 +246,7 @@ namespace DTExtractor.Core
                 {
                     vertices = new List<XYZ>(facets.Count * 3);
                     normalsList = new List<XYZ>(facets.Count * 3);
-                    uvList = rawUvs.Count > 0 ? new List<UV>(facets.Count * 3) : null;
+                    uvList = rawUvs != null && rawUvs.Count > 0 ? new List<UV>(facets.Count * 3) : null;
                     indices = new List<int>(facets.Count * 3);
 
                     for (int fi = 0; fi < facets.Count; fi++)
@@ -245,11 +254,24 @@ namespace DTExtractor.Core
                         var facet = facets[fi];
                         int baseIdx = vertices.Count;
 
-                        vertices.Add(points[facet.V1]);
-                        vertices.Add(points[facet.V2]);
-                        vertices.Add(points[facet.V3]);
+                        var p0 = points[facet.V1];
+                        var p1 = points[facet.V2];
+                        var p2 = points[facet.V3];
+                        vertices.Add(p0);
+                        vertices.Add(p1);
+                        vertices.Add(p2);
 
-                        if (distribution == DistributionOfNormals.OnePerFace)
+                        if (rawNormals == null)
+                        {
+                            var edge1 = p1 - p0;
+                            var edge2 = p2 - p0;
+                            var cross = edge1.CrossProduct(edge2);
+                            var normal = cross.GetLength() > 1e-10 ? cross.Normalize() : XYZ.BasisZ;
+                            normalsList.Add(normal);
+                            normalsList.Add(normal);
+                            normalsList.Add(normal);
+                        }
+                        else if (distribution == DistributionOfNormals.OnePerFace)
                         {
                             var n = rawNormals[0];
                             normalsList.Add(n);
@@ -296,7 +318,15 @@ namespace DTExtractor.Core
             catch (Exception ex)
             {
                 _polymeshFailCount++;
-                try { System.IO.File.AppendAllText(_logPath, $"[{DateTime.Now:HH:mm:ss}] OnPolymesh failed for {_currentGuid}: {ex.Message}\r\n"); } catch { }
+                try
+                {
+                    var stLines = ex.StackTrace?.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+                    var firstLine = stLines != null && stLines.Length > 0 ? stLines[0].Trim() : "N/A";
+                    System.IO.File.AppendAllText(_logPath,
+                        $"[{DateTime.Now:HH:mm:ss}] OnPolymesh failed for {_currentGuid}: [{ex.GetType().FullName}] {ex.Message}\r\n" +
+                        $"  at: {firstLine}\r\n");
+                }
+                catch { }
             }
         }
 

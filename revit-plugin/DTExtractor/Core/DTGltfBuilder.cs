@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
-using System.Text.Json;
 using System.Text.Json.Nodes;
 using Autodesk.Revit.DB;
 using SharpGLTF.Geometry;
@@ -99,18 +98,35 @@ namespace DTExtractor.Core
         public void AddInstance(int meshId, Transform transform, string guid, string name)
         {
             if (!_meshes.ContainsKey(meshId))
-                throw new ArgumentException($"Mesh {meshId} not found");
+                return;
 
             _guidList.Add(guid);
 
             var instanceNode = _scene.CreateNode($"inst_{guid}_{_guidList.Count}");
             instanceNode.WithMesh(_meshes[meshId]);
 
-            // Set transform matrix
-            var matrix = ToMatrix4x4(transform);
-            instanceNode.LocalMatrix = matrix;
+            try
+            {
+                var matrix = ToMatrix4x4(transform);
+                instanceNode.LocalMatrix = matrix;
+            }
+            catch
+            {
+                try
+                {
+                    var origin = transform.Origin;
+                    instanceNode.LocalMatrix = Matrix4x4.CreateTranslation(
+                        (float)origin.X, (float)origin.Y, (float)origin.Z);
+                }
+                catch { }
+            }
 
-            instanceNode.Extras = JsonSerializer.SerializeToNode(new { guid = guid, name = name });
+            try
+            {
+                var json = Newtonsoft.Json.JsonConvert.SerializeObject(new { guid = guid, name = name });
+                instanceNode.Extras = JsonNode.Parse(json);
+            }
+            catch { }
         }
 
         private MaterialBuilder GetOrCreateMaterial(MaterialData data)
@@ -137,13 +153,18 @@ namespace DTExtractor.Core
         {
             var glbPath = System.IO.Path.ChangeExtension(OutputPath, ".glb");
 
-            _model.Extras = JsonSerializer.SerializeToNode(new
+            try
             {
-                generator = "DTExtractor",
-                version = "1.0.0",
-                guidCount = _guidList.Count,
-                extractedAt = DateTime.UtcNow.ToString("o")
-            });
+                var json = Newtonsoft.Json.JsonConvert.SerializeObject(new
+                {
+                    generator = "DTExtractor",
+                    version = "1.0.0",
+                    guidCount = _guidList.Count,
+                    extractedAt = DateTime.UtcNow.ToString("o")
+                });
+                _model.Extras = JsonNode.Parse(json);
+            }
+            catch { }
 
             // Save with Draco compression (if available)
             var settings = new SharpGLTF.Schema2.WriteSettings
