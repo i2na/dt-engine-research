@@ -49,12 +49,14 @@ namespace DTExtractor.Commands
                     }
 
                     var exporter = new DTGeometryExporter(doc, outputPath);
-                    var customExporter = new CustomExporter(doc, exporter);
-                    customExporter.IncludeGeometricObjects = true;
-                    customExporter.ShouldStopOnError = false;
 
                     var swExport = Stopwatch.StartNew();
-                    customExporter.Export(view3D);
+                    using (var customExporter = new CustomExporter(doc, exporter))
+                    {
+                        customExporter.IncludeGeometricObjects = false;
+                        customExporter.ShouldStopOnError = false;
+                        customExporter.Export(view3D);
+                    }
                     swExport.Stop();
 
                     var swSerialize = Stopwatch.StartNew();

@@ -115,7 +115,7 @@ namespace DTExtractor.Core
         public RenderNodeAction OnElementBegin(ElementId elementId)
         {
             var element = _doc.GetElement(elementId);
-            if (element == null)
+            if (element == null || !element.IsValidObject)
                 return RenderNodeAction.Skip;
 
             _currentGuid = element.UniqueId;
