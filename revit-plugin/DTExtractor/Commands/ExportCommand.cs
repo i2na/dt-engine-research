@@ -82,12 +82,31 @@ namespace DTExtractor.Commands
                     var glbPath = Path.ChangeExtension(outputPath, ".glb");
                     var parquetPath = Path.ChangeExtension(outputPath, ".parquet");
 
-                    var glbSize = new FileInfo(glbPath).Length / 1024.0 / 1024.0;
-                    var parquetSize = new FileInfo(parquetPath).Length / 1024.0 / 1024.0;
+                    var glbExists = File.Exists(glbPath);
+                    var parquetExists = File.Exists(parquetPath);
 
-                    var statusLabel = exportHadError ? "Export Complete (partial)" : "Export Complete";
-                    var warningLine = exportHadError
-                        ? "Warning: Some elements were skipped due to invalid object references.\n\n"
+                    var glbSize = glbExists ? new FileInfo(glbPath).Length / 1024.0 / 1024.0 : 0;
+                    var parquetSize = parquetExists ? new FileInfo(parquetPath).Length / 1024.0 / 1024.0 : 0;
+
+                    if (!parquetExists)
+                    {
+                        TaskDialog.Show(
+                            "Export Failed",
+                            $"Export completed but no usable geometry was extracted.\n\n" +
+                            $"Elements processed: {exporter.ElementCount}\n" +
+                            $"Polymesh callbacks: {exporter.PolymeshCount}\n" +
+                            $"Polymesh failures: {exporter.PolymeshFailCount}\n\n" +
+                            $"This typically occurs when the model contains elements with\n" +
+                            $"invalid or deleted object references.\n\n" +
+                            $"Diagnostic log: {Path.GetFileName(exportLogPath)}");
+
+                        return Result.Failed;
+                    }
+
+                    var statusLabel = exportHadError || exporter.PolymeshFailCount > 0
+                        ? "Export Complete (partial)" : "Export Complete";
+                    var warningLine = exporter.PolymeshFailCount > 0
+                        ? $"Warning: {exporter.PolymeshFailCount} of {exporter.PolymeshCount} polymeshes failed.\n\n"
                         : "";
 
                     TaskDialog.Show(

@@ -27,10 +27,12 @@ namespace DTExtractor.Core
 
         private int _elementCount;
         private int _polymeshCount;
+        private int _polymeshFailCount;
         private readonly string _logPath;
 
         public int ElementCount => _elementCount;
         public int PolymeshCount => _polymeshCount;
+        public int PolymeshFailCount => _polymeshFailCount;
 
         public DTGeometryExporter(Document doc, string outputPath)
         {
@@ -55,7 +57,7 @@ namespace DTExtractor.Core
         {
             try
             {
-                System.IO.File.AppendAllText(_logPath, $"[{DateTime.Now:HH:mm:ss}] Export callback finished. elements={_elementCount}, polymeshes={_polymeshCount}\r\n");
+                System.IO.File.AppendAllText(_logPath, $"[{DateTime.Now:HH:mm:ss}] Export callback finished. elements={_elementCount}, polymeshes={_polymeshCount}, polymesh_failures={_polymeshFailCount}\r\n");
             }
             catch { }
         }
@@ -67,11 +69,17 @@ namespace DTExtractor.Core
             _gltfBuilder.SerializeToGlb();
             try { System.IO.File.AppendAllText(_logPath, $"[{DateTime.Now:HH:mm:ss}] GLB written.\r\n"); } catch { }
 
+            var parquetGuids = _metadataCollector.GetAllGuids();
+            if (parquetGuids.Count == 0)
+            {
+                try { System.IO.File.AppendAllText(_logPath, $"[{DateTime.Now:HH:mm:ss}] WARNING: No valid element records collected. Parquet NOT created. (polymesh failures={_polymeshFailCount}/{_polymeshCount})\r\n"); } catch { }
+                return;
+            }
+
             _metadataCollector.SerializeToParquet(_gltfBuilder.OutputPath);
-            try { System.IO.File.AppendAllText(_logPath, $"[{DateTime.Now:HH:mm:ss}] Parquet written.\r\n"); } catch { }
+            try { System.IO.File.AppendAllText(_logPath, $"[{DateTime.Now:HH:mm:ss}] Parquet written. ({parquetGuids.Count} records)\r\n"); } catch { }
 
             var gltfGuids = _gltfBuilder.GetAllGuids();
-            var parquetGuids = _metadataCollector.GetAllGuids();
 
             if (!gltfGuids.SetEquals(parquetGuids))
             {
@@ -193,10 +201,10 @@ namespace DTExtractor.Core
             if (string.IsNullOrEmpty(_currentGuid))
                 return;
 
+            _polymeshCount++;
+
             try
             {
-                _polymeshCount++;
-
                 var points = polymesh.GetPoints();
                 var facets = polymesh.GetFacets();
 
@@ -287,6 +295,7 @@ namespace DTExtractor.Core
             }
             catch (Exception ex)
             {
+                _polymeshFailCount++;
                 try { System.IO.File.AppendAllText(_logPath, $"[{DateTime.Now:HH:mm:ss}] OnPolymesh failed for {_currentGuid}: {ex.Message}\r\n"); } catch { }
             }
         }
@@ -339,17 +348,24 @@ namespace DTExtractor.Core
             if (materialNode == null)
                 return MaterialData.Default;
 
-            return new MaterialData
+            try
             {
-                Color = new double[]
+                return new MaterialData
                 {
-                    materialNode.Color.Red / 255.0,
-                    materialNode.Color.Green / 255.0,
-                    materialNode.Color.Blue / 255.0
-                },
-                Transparency = materialNode.Transparency,
-                Smoothness = materialNode.Smoothness
-            };
+                    Color = new double[]
+                    {
+                        materialNode.Color.Red / 255.0,
+                        materialNode.Color.Green / 255.0,
+                        materialNode.Color.Blue / 255.0
+                    },
+                    Transparency = materialNode.Transparency,
+                    Smoothness = materialNode.Smoothness
+                };
+            }
+            catch
+            {
+                return MaterialData.Default;
+            }
         }
 
         public List<DTElementRecord> GetExtractedRecords()
