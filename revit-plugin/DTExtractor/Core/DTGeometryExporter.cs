@@ -159,8 +159,16 @@ namespace DTExtractor.Core
 
         public RenderNodeAction OnInstanceBegin(InstanceNode node)
         {
-            var parent = _transformStack.Count > 0 ? _transformStack.Peek() : Transform.Identity;
-            _transformStack.Push(parent.Multiply(node.GetTransform()));
+            try
+            {
+                var parent = _transformStack.Count > 0 ? _transformStack.Peek() : Transform.Identity;
+                _transformStack.Push(parent.Multiply(node.GetTransform()));
+            }
+            catch (Exception ex)
+            {
+                try { System.IO.File.AppendAllText(_logPath, $"[{DateTime.Now:HH:mm:ss}] OnInstanceBegin failed: {ex.Message}\r\n"); } catch { }
+                return RenderNodeAction.Skip;
+            }
             return RenderNodeAction.Proceed;
         }
 
@@ -185,95 +193,102 @@ namespace DTExtractor.Core
             if (string.IsNullOrEmpty(_currentGuid))
                 return;
 
-            _polymeshCount++;
-
-            var points = polymesh.GetPoints();
-            var facets = polymesh.GetFacets();
-
-            if (points.Count == 0 || facets.Count == 0)
-                return;
-
-            var rawNormals = polymesh.GetNormals();
-            var rawUvs = polymesh.GetUVs();
-            var distribution = polymesh.DistributionOfNormals;
-
-            List<XYZ> vertices;
-            List<XYZ> normalsList;
-            List<UV> uvList;
-            List<int> indices;
-
-            if (distribution == DistributionOfNormals.AtEachPoint)
+            try
             {
-                vertices = points.ToList();
-                normalsList = rawNormals.ToList();
-                uvList = rawUvs.Count > 0 ? rawUvs.Cast<UV>().ToList() : null;
-                indices = new List<int>(facets.Count * 3);
-                for (int i = 0; i < facets.Count; i++)
+                _polymeshCount++;
+
+                var points = polymesh.GetPoints();
+                var facets = polymesh.GetFacets();
+
+                if (points.Count == 0 || facets.Count == 0)
+                    return;
+
+                var rawNormals = polymesh.GetNormals();
+                var rawUvs = polymesh.GetUVs();
+                var distribution = polymesh.DistributionOfNormals;
+
+                List<XYZ> vertices;
+                List<XYZ> normalsList;
+                List<UV> uvList;
+                List<int> indices;
+
+                if (distribution == DistributionOfNormals.AtEachPoint)
                 {
-                    indices.Add(facets[i].V1);
-                    indices.Add(facets[i].V2);
-                    indices.Add(facets[i].V3);
+                    vertices = points.ToList();
+                    normalsList = rawNormals.ToList();
+                    uvList = rawUvs.Count > 0 ? rawUvs.Cast<UV>().ToList() : null;
+                    indices = new List<int>(facets.Count * 3);
+                    for (int i = 0; i < facets.Count; i++)
+                    {
+                        indices.Add(facets[i].V1);
+                        indices.Add(facets[i].V2);
+                        indices.Add(facets[i].V3);
+                    }
                 }
-            }
-            else
-            {
-                vertices = new List<XYZ>(facets.Count * 3);
-                normalsList = new List<XYZ>(facets.Count * 3);
-                uvList = rawUvs.Count > 0 ? new List<UV>(facets.Count * 3) : null;
-                indices = new List<int>(facets.Count * 3);
-
-                for (int fi = 0; fi < facets.Count; fi++)
+                else
                 {
-                    var facet = facets[fi];
-                    int baseIdx = vertices.Count;
+                    vertices = new List<XYZ>(facets.Count * 3);
+                    normalsList = new List<XYZ>(facets.Count * 3);
+                    uvList = rawUvs.Count > 0 ? new List<UV>(facets.Count * 3) : null;
+                    indices = new List<int>(facets.Count * 3);
 
-                    vertices.Add(points[facet.V1]);
-                    vertices.Add(points[facet.V2]);
-                    vertices.Add(points[facet.V3]);
-
-                    if (distribution == DistributionOfNormals.OnePerFace)
+                    for (int fi = 0; fi < facets.Count; fi++)
                     {
-                        var n = rawNormals[0];
-                        normalsList.Add(n);
-                        normalsList.Add(n);
-                        normalsList.Add(n);
-                    }
-                    else
-                    {
-                        normalsList.Add(rawNormals[fi * 3]);
-                        normalsList.Add(rawNormals[fi * 3 + 1]);
-                        normalsList.Add(rawNormals[fi * 3 + 2]);
-                    }
+                        var facet = facets[fi];
+                        int baseIdx = vertices.Count;
 
-                    if (uvList != null)
-                    {
-                        uvList.Add(rawUvs.Count > facet.V1 ? rawUvs[facet.V1] : new UV(0, 0));
-                        uvList.Add(rawUvs.Count > facet.V2 ? rawUvs[facet.V2] : new UV(0, 0));
-                        uvList.Add(rawUvs.Count > facet.V3 ? rawUvs[facet.V3] : new UV(0, 0));
-                    }
+                        vertices.Add(points[facet.V1]);
+                        vertices.Add(points[facet.V2]);
+                        vertices.Add(points[facet.V3]);
 
-                    indices.Add(baseIdx);
-                    indices.Add(baseIdx + 1);
-                    indices.Add(baseIdx + 2);
+                        if (distribution == DistributionOfNormals.OnePerFace)
+                        {
+                            var n = rawNormals[0];
+                            normalsList.Add(n);
+                            normalsList.Add(n);
+                            normalsList.Add(n);
+                        }
+                        else
+                        {
+                            normalsList.Add(rawNormals[fi * 3]);
+                            normalsList.Add(rawNormals[fi * 3 + 1]);
+                            normalsList.Add(rawNormals[fi * 3 + 2]);
+                        }
+
+                        if (uvList != null)
+                        {
+                            uvList.Add(rawUvs.Count > facet.V1 ? rawUvs[facet.V1] : new UV(0, 0));
+                            uvList.Add(rawUvs.Count > facet.V2 ? rawUvs[facet.V2] : new UV(0, 0));
+                            uvList.Add(rawUvs.Count > facet.V3 ? rawUvs[facet.V3] : new UV(0, 0));
+                        }
+
+                        indices.Add(baseIdx);
+                        indices.Add(baseIdx + 1);
+                        indices.Add(baseIdx + 2);
+                    }
                 }
+
+                string meshHash = ComputeMeshHash(points, facets);
+                var currentTransform = _transformStack.Count > 0 ? _transformStack.Peek() : Transform.Identity;
+
+                if (_meshHashMap.ContainsKey(meshHash))
+                {
+                    _gltfBuilder.AddInstance(_meshHashMap[meshHash], currentTransform, _currentGuid, _currentName);
+                }
+                else
+                {
+                    var materialData = ExtractMaterialData(_currentMaterial);
+                    int meshIndex = _gltfBuilder.AddMesh(vertices, normalsList, uvList, indices, materialData);
+                    _meshHashMap[meshHash] = meshIndex;
+                    _gltfBuilder.AddInstance(meshIndex, currentTransform, _currentGuid, _currentName);
+                }
+
+                _currentElementHasGeometry = true;
             }
-
-            string meshHash = ComputeMeshHash(points, facets);
-            var currentTransform = _transformStack.Count > 0 ? _transformStack.Peek() : Transform.Identity;
-
-            if (_meshHashMap.ContainsKey(meshHash))
+            catch (Exception ex)
             {
-                _gltfBuilder.AddInstance(_meshHashMap[meshHash], currentTransform, _currentGuid, _currentName);
+                try { System.IO.File.AppendAllText(_logPath, $"[{DateTime.Now:HH:mm:ss}] OnPolymesh failed for {_currentGuid}: {ex.Message}\r\n"); } catch { }
             }
-            else
-            {
-                var materialData = ExtractMaterialData(_currentMaterial);
-                int meshIndex = _gltfBuilder.AddMesh(vertices, normalsList, uvList, indices, materialData);
-                _meshHashMap[meshHash] = meshIndex;
-                _gltfBuilder.AddInstance(meshIndex, currentTransform, _currentGuid, _currentName);
-            }
-
-            _currentElementHasGeometry = true;
         }
 
         public void OnRPC(RPCNode node)

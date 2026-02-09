@@ -54,7 +54,7 @@
       <_AddinFiles Include="$(ProjectDir)DTExtractor.addin" />
       <_AddinDestFiles Include="@(_AddinFiles->'$(_AddinDestDir)\%(Filename)%(Extension)')" />
     </ItemGroup>
-    <Delete Files="@(_AddinDestFiles)" />
-    <Copy SourceFiles="@(_AddinFiles)" DestinationFolder="$(_AddinDestDir)" SkipUnchangedFiles="true" />
+    <Delete Files="@(_AddinDestFiles)" ContinueOnError="WarnAndContinue" />
+    <Copy SourceFiles="@(_AddinFiles)" DestinationFolder="$(_AddinDestDir)" SkipUnchangedFiles="true" ContinueOnError="WarnAndContinue" />
   </Target>
 </Project>

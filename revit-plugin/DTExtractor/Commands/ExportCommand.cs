@@ -49,13 +49,23 @@ namespace DTExtractor.Commands
                     }
 
                     var exporter = new DTGeometryExporter(doc, outputPath);
+                    var exportLogPath = Path.ChangeExtension(outputPath, ".export-log.txt");
+                    bool exportHadError = false;
 
                     var swExport = Stopwatch.StartNew();
                     using (var customExporter = new CustomExporter(doc, exporter))
                     {
                         customExporter.IncludeGeometricObjects = false;
                         customExporter.ShouldStopOnError = false;
-                        customExporter.Export(view3D);
+                        try
+                        {
+                            customExporter.Export(view3D);
+                        }
+                        catch (Autodesk.Revit.Exceptions.InvalidObjectException ioEx)
+                        {
+                            exportHadError = true;
+                            try { File.AppendAllText(exportLogPath, $"[{DateTime.Now:HH:mm:ss}] Export() hit invalid object (continuing with partial data): {ioEx.Message}\r\n"); } catch { }
+                        }
                     }
                     swExport.Stop();
 
@@ -63,22 +73,26 @@ namespace DTExtractor.Commands
                     exporter.Serialize();
                     swSerialize.Stop();
 
-                    var exportLogPath = Path.ChangeExtension(outputPath, ".export-log.txt");
                     try
                     {
                         File.AppendAllText(exportLogPath, $"[{DateTime.Now:HH:mm:ss}] Export() took {swExport.Elapsed.TotalSeconds:F1}s, Serialize() took {swSerialize.Elapsed.TotalSeconds:F1}s. elements={exporter.ElementCount}, polymeshes={exporter.PolymeshCount}\r\n");
                     }
                     catch { }
 
-                    // Success message
                     var glbPath = Path.ChangeExtension(outputPath, ".glb");
                     var parquetPath = Path.ChangeExtension(outputPath, ".parquet");
 
                     var glbSize = new FileInfo(glbPath).Length / 1024.0 / 1024.0;
                     var parquetSize = new FileInfo(parquetPath).Length / 1024.0 / 1024.0;
 
+                    var statusLabel = exportHadError ? "Export Complete (partial)" : "Export Complete";
+                    var warningLine = exportHadError
+                        ? "Warning: Some elements were skipped due to invalid object references.\n\n"
+                        : "";
+
                     TaskDialog.Show(
-                        "Export Complete",
+                        statusLabel,
+                        $"{warningLine}" +
                         $"Files exported successfully:\n\n" +
                         $"Geometry: {Path.GetFileName(glbPath)} ({glbSize:F2} MB)\n" +
                         $"Metadata: {Path.GetFileName(parquetPath)} ({parquetSize:F2} MB)\n" +

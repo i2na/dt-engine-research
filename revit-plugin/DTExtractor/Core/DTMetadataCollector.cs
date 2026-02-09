@@ -15,7 +15,7 @@ namespace DTExtractor.Core
 
         public DTElementRecord ExtractElement(Element element)
         {
-            if (element == null)
+            if (element == null || !element.IsValidObject)
                 return null;
 
             var record = new DTElementRecord
@@ -36,9 +36,9 @@ namespace DTExtractor.Core
                 element.Parameters, ParameterSource.Instance);
 
             // 2. Type Parameters
-            if (element is FamilyInstance fi && fi.Symbol != null)
+            if (element is FamilyInstance fi && fi.Symbol != null && fi.Symbol.IsValidObject)
             {
-                record.FamilyName = fi.Symbol.Family.Name;
+                record.FamilyName = fi.Symbol.Family?.Name;
                 record.TypeName = fi.Symbol.Name;
                 record.TypeParameters = ExtractParameters(
                     fi.Symbol.Parameters, ParameterSource.Type);
@@ -49,7 +49,7 @@ namespace DTExtractor.Core
                 if (typeId != ElementId.InvalidElementId)
                 {
                     var typeElement = element.Document.GetElement(typeId);
-                    if (typeElement != null)
+                    if (typeElement != null && typeElement.IsValidObject)
                     {
                         record.TypeName = typeElement.Name;
                         record.TypeParameters = ExtractParameters(

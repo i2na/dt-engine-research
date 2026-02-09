@@ -4,3 +4,7 @@ node_modules
 *.rvt
 *.glb
 *.parquet
+
+bin/
+obj/
+.vs/
