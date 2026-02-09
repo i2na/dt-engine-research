@@ -34,28 +34,35 @@ export interface IRenderBackend {
  */
 export class WebGL2Backend implements IRenderBackend {
     public readonly type: BackendType = "webgl2";
-    public readonly renderer: THREE.WebGLRenderer;
-    public readonly capabilities: BackendCapabilities;
+    public get renderer(): THREE.WebGLRenderer {
+        return this._renderer;
+    }
+    public get capabilities(): BackendCapabilities {
+        return this._capabilities;
+    }
+    private _renderer!: THREE.WebGLRenderer;
+    private _capabilities!: BackendCapabilities;
 
     private idRenderTarget: THREE.WebGLRenderTarget | null = null;
-    private idMaterial: THREE.ShaderMaterial | null = null;
 
-    constructor() {
-        // Create WebGL 2.0 renderer
-        this.renderer = new THREE.WebGLRenderer({
+    async initialize(canvas: HTMLCanvasElement): Promise<void> {
+        this._renderer = new THREE.WebGLRenderer({
+            canvas,
             antialias: true,
             alpha: false,
             powerPreference: "high-performance",
         });
 
-        this.renderer.shadowMap.enabled = true;
-        this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-        this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-        this.renderer.toneMappingExposure = 1.0;
+        this._renderer.shadowMap.enabled = true;
+        this._renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        this._renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        this._renderer.toneMappingExposure = 1.0;
+        this._renderer.outputColorSpace = THREE.SRGBColorSpace;
+        this._renderer.setPixelRatio(Math.min(2.0, window.devicePixelRatio));
+        this._renderer.setSize(canvas.clientWidth, canvas.clientHeight);
 
-        // Detect capabilities
-        const gl = this.renderer.getContext() as WebGL2RenderingContext;
-        this.capabilities = {
+        const gl = this._renderer.getContext() as WebGL2RenderingContext;
+        this._capabilities = {
             computeShaders: false,
             indirectDraw: gl.getExtension("WEBGL_multi_draw") !== null,
             maxTextureSize: gl.getParameter(gl.MAX_TEXTURE_SIZE),
@@ -63,14 +70,7 @@ export class WebGL2Backend implements IRenderBackend {
             multiDrawIndirect: false,
             gpuDrivenCulling: false,
         };
-    }
 
-    async initialize(canvas: HTMLCanvasElement): Promise<void> {
-        this.renderer.setPixelRatio(window.devicePixelRatio);
-        this.renderer.setSize(canvas.clientWidth, canvas.clientHeight);
-        canvas.appendChild(this.renderer.domElement);
-
-        // Create ID render target for object picking (MRT simulation)
         this.idRenderTarget = new THREE.WebGLRenderTarget(canvas.clientWidth, canvas.clientHeight, {
             minFilter: THREE.NearestFilter,
             magFilter: THREE.NearestFilter,
@@ -84,24 +84,21 @@ export class WebGL2Backend implements IRenderBackend {
 
     dispose(): void {
         this.idRenderTarget?.dispose();
-        this.renderer.dispose();
+        this._renderer.dispose();
     }
 
     render(scene: THREE.Scene, camera: THREE.Camera): void {
-        this.renderer.render(scene, camera);
+        this._renderer.render(scene, camera);
     }
 
     setSize(width: number, height: number): void {
-        this.renderer.setSize(width, height);
+        this._renderer.setSize(width, height);
         this.idRenderTarget?.setSize(width, height);
     }
 
     readPixelId(x: number, y: number): number {
-        // Render ID buffer and read pixel
-        // This is a simplified implementation
-        // Full implementation would render scene with ID shader
         const pixelBuffer = new Uint8Array(4);
-        this.renderer.readRenderTargetPixels(
+        this._renderer.readRenderTargetPixels(
             this.idRenderTarget!,
             x,
             this.idRenderTarget!.height - y,

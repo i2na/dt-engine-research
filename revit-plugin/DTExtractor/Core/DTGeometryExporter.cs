@@ -1,146 +1,148 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
-using System.Security.Cryptography;
+using System.Numerics;
 using System.Text;
 using Autodesk.Revit.DB;
+using Autodesk.Revit.DB.Visual;
 using DTExtractor.Models;
 
 namespace DTExtractor.Core
 {
-    /// <summary>
-    /// IExportContext implementation for geometry extraction via CustomExporter
-    /// Exports tessellated mesh data with instancing optimization
-    /// </summary>
     public class DTGeometryExporter : IExportContext
     {
-        private readonly Document _doc;
+        private readonly Document _hostDoc;
+        private Document _currentDoc;
         private readonly DTGltfBuilder _gltfBuilder;
         private readonly DTMetadataCollector _metadataCollector;
-        private readonly Dictionary<string, int> _meshHashMap;
+        private readonly string _outputPath;
 
+        private readonly Stack<Transform> _transformStack = new Stack<Transform>();
+        private Transform CurrentTransform => _transformStack.Count > 0 ? _transformStack.Peek() : Transform.Identity;
+
+        private Element _currentElement;
         private string _currentGuid;
         private string _currentName;
-        private MaterialNode _currentMaterial;
-        private readonly Stack<Transform> _transformStack = new Stack<Transform>();
-        private bool _currentElementHasGeometry;
+        private MaterialData _currentMaterialData;
+        private string _currentMaterialKey;
+        private Dictionary<string, ElementGeometryBuffer> _elementGeometry;
+        private Transform _linkTransform;
+        private bool _isLink;
 
         private int _elementCount;
         private int _polymeshCount;
         private int _polymeshFailCount;
+        private int _estimatedTotalElements;
+
+        private readonly StreamWriter _logWriter;
         private readonly string _logPath;
+        private bool _logClosed;
+        private IDTProgressIndicator _progressIndicator;
 
         public int ElementCount => _elementCount;
         public int PolymeshCount => _polymeshCount;
         public int PolymeshFailCount => _polymeshFailCount;
 
+        private static readonly Dictionary<string, string> ColorPropertyMap = new Dictionary<string, string>
+        {
+            { "PrismGenericSchema", "generic_diffuse" },
+            { "GenericSchema", "generic_diffuse" },
+            { "ConcreteSchema", "concrete_color" },
+            { "WallPaintSchema", "wallpaint_color" },
+            { "PlasticVinylSchema", "plasticvinyl_color" },
+            { "MetallicPaintSchema", "metallicpaint_base_color" },
+            { "CeramicSchema", "ceramic_color" },
+            { "MetalSchema", "metal_color" },
+            { "PrismMetalSchema", "adsklib_Metal_F0" },
+            { "PrismOpaqueSchema", "opaque_albedo" },
+            { "PrismLayeredSchema", "adsklib_Layered_Diffuse" },
+            { "HardwoodSchema", "hardwood_color" },
+            { "PrismMasonryCMUSchema", "masonrycmu_color" },
+            { "MasonryCMUSchema", "masonrycmu_color" },
+        };
+
         public DTGeometryExporter(Document doc, string outputPath)
         {
-            _doc = doc;
+            _hostDoc = doc;
+            _currentDoc = doc;
+            _outputPath = outputPath;
             _gltfBuilder = new DTGltfBuilder(outputPath);
             _metadataCollector = new DTMetadataCollector();
-            _meshHashMap = new Dictionary<string, int>();
-            _logPath = System.IO.Path.ChangeExtension(outputPath, ".export-log.txt");
+            _logPath = Path.ChangeExtension(outputPath, ".export-log.txt");
+            _logWriter = new StreamWriter(_logPath, false, Encoding.UTF8) { AutoFlush = false };
+
+            try
+            {
+                _estimatedTotalElements = new FilteredElementCollector(_hostDoc)
+                    .WhereElementIsNotElementType()
+                    .GetElementCount();
+            }
+            catch { _estimatedTotalElements = 10000; }
         }
+
+        public void SetProgressIndicator(IDTProgressIndicator indicator) => _progressIndicator = indicator;
+
+        #region IExportContext
 
         public bool Start()
         {
-            try
-            {
-                System.IO.File.WriteAllText(_logPath, $"[{DateTime.Now:HH:mm:ss}] Export started.\r\n");
-            }
-            catch { }
+            _transformStack.Clear();
+            _transformStack.Push(Transform.Identity);
+            _logWriter.WriteLine($"[{DateTime.Now:HH:mm:ss}] Export started. Estimated elements: {_estimatedTotalElements}");
+            _logWriter.Flush();
+            _progressIndicator?.Report(0, _estimatedTotalElements);
             return true;
         }
 
         public void Finish()
         {
-            try
-            {
-                System.IO.File.AppendAllText(_logPath, $"[{DateTime.Now:HH:mm:ss}] Export callback finished. elements={_elementCount}, polymeshes={_polymeshCount}, polymesh_failures={_polymeshFailCount}\r\n");
-            }
-            catch { }
+            _progressIndicator?.Report(_elementCount, _estimatedTotalElements);
+            _logWriter.WriteLine($"[{DateTime.Now:HH:mm:ss}] Export finished. elements={_elementCount}, polymeshes={_polymeshCount}, failures={_polymeshFailCount}");
+            _logWriter.Flush();
         }
 
-        public void Serialize()
-        {
-            try { System.IO.File.AppendAllText(_logPath, $"[{DateTime.Now:HH:mm:ss}] Writing GLB and Parquet...\r\n"); } catch { }
-
-            _gltfBuilder.SerializeToGlb();
-            try { System.IO.File.AppendAllText(_logPath, $"[{DateTime.Now:HH:mm:ss}] GLB written.\r\n"); } catch { }
-
-            _metadataCollector.SerializeToParquet(_gltfBuilder.OutputPath);
-
-            var parquetGuids = _metadataCollector.GetAllGuids();
-            var gltfGuids = _gltfBuilder.GetAllGuids();
-
-            try
-            {
-                System.IO.File.AppendAllText(_logPath,
-                    $"[{DateTime.Now:HH:mm:ss}] Parquet written. records={parquetGuids.Count}, geometry_instances={gltfGuids.Count}, polymesh_failures={_polymeshFailCount}/{_polymeshCount}\r\n");
-
-                if (gltfGuids.Count > 0 && !gltfGuids.SetEquals(parquetGuids))
-                {
-                    var onlyInGlb = new HashSet<string>(gltfGuids);
-                    onlyInGlb.ExceptWith(parquetGuids);
-                    var onlyInParquet = new HashSet<string>(parquetGuids);
-                    onlyInParquet.ExceptWith(gltfGuids);
-
-                    System.IO.File.AppendAllText(_logPath,
-                        $"[{DateTime.Now:HH:mm:ss}] GUID coverage: only_in_GLB={onlyInGlb.Count}, only_in_Parquet={onlyInParquet.Count}\r\n");
-                }
-            }
-            catch { }
-        }
-
-        public bool IsCanceled()
-        {
-            return false;
-        }
+        public bool IsCanceled() => false;
 
         public RenderNodeAction OnViewBegin(ViewNode node)
         {
-            // Set tessellation quality (LOD control)
-            node.LevelOfDetail = 8; // 0-15, higher = more detail
+            node.LevelOfDetail = 8;
             return RenderNodeAction.Proceed;
         }
 
-        public void OnViewEnd(ElementId elementId)
-        {
-            // View completed
-        }
+        public void OnViewEnd(ElementId elementId) { }
 
         public RenderNodeAction OnElementBegin(ElementId elementId)
         {
-            var element = _doc.GetElement(elementId);
+            var element = _currentDoc.GetElement(elementId);
             if (element == null || !element.IsValidObject)
                 return RenderNodeAction.Skip;
 
+            _currentElement = element;
             _currentGuid = element.UniqueId;
             _currentName = element.Name;
-            _currentElementHasGeometry = false;
+            _currentMaterialData = MaterialData.Default;
+            _currentMaterialKey = MaterialData.Default.GetKey();
+            _elementGeometry = new Dictionary<string, ElementGeometryBuffer>();
+
+            if (element is RevitLinkInstance linkInstance)
+                _linkTransform = linkInstance.GetTransform();
+
             _elementCount++;
 
-            try
-            {
-                _metadataCollector.ExtractElement(element);
-            }
+            try { _metadataCollector.ExtractElement(element); }
             catch (Exception ex)
             {
-                try
-                {
-                    System.IO.File.AppendAllText(_logPath, $"[{DateTime.Now:HH:mm:ss}] Element #{_elementCount} ExtractElement failed: {ex.Message}\r\n");
-                }
-                catch { }
+                LogError($"ExtractElement failed for {_currentGuid}: {ex.Message}");
             }
 
-            if (_elementCount % 5000 == 0)
+            if (_elementCount % 100 == 0)
+                _progressIndicator?.Report(_elementCount, _estimatedTotalElements);
+
+            if (_elementCount % 1000 == 0)
             {
-                try
-                {
-                    System.IO.File.AppendAllText(_logPath, $"[{DateTime.Now:HH:mm:ss}] Progress: elements={_elementCount}, polymeshes={_polymeshCount}\r\n");
-                }
-                catch { }
+                _logWriter.WriteLine($"[{DateTime.Now:HH:mm:ss}] Progress: elements={_elementCount}, polymeshes={_polymeshCount}, failures={_polymeshFailCount}");
+                _logWriter.Flush();
             }
 
             return RenderNodeAction.Proceed;
@@ -148,39 +150,34 @@ namespace DTExtractor.Core
 
         public void OnElementEnd(ElementId elementId)
         {
+            if (_currentElement == null || _elementGeometry == null || _elementGeometry.Count == 0)
+            {
+                _currentElement = null;
+                _currentGuid = null;
+                return;
+            }
+
+            try
+            {
+                bool hasGeometry = _elementGeometry.Values.Any(b => b.VertexCount > 0);
+                if (hasGeometry)
+                    _gltfBuilder.AddElement(_currentGuid, _currentName, _elementGeometry);
+            }
+            catch (Exception ex)
+            {
+                LogError($"AddElement failed for {_currentGuid}: [{ex.GetType().Name}] {ex.Message}");
+            }
+
+            _elementGeometry = null;
+            _currentElement = null;
             _currentGuid = null;
             _currentName = null;
         }
 
-        public RenderNodeAction OnInstanceBegin(InstanceNode node)
-        {
-            try
-            {
-                var parent = _transformStack.Count > 0 ? _transformStack.Peek() : Transform.Identity;
-                _transformStack.Push(parent.Multiply(node.GetTransform()));
-            }
-            catch (Exception ex)
-            {
-                try { System.IO.File.AppendAllText(_logPath, $"[{DateTime.Now:HH:mm:ss}] OnInstanceBegin failed: {ex.Message}\r\n"); } catch { }
-                return RenderNodeAction.Skip;
-            }
-            return RenderNodeAction.Proceed;
-        }
-
-        public void OnInstanceEnd(InstanceNode node)
-        {
-            if (_transformStack.Count > 0)
-                _transformStack.Pop();
-        }
-
-        public void OnLight(LightNode node)
-        {
-            // Lights are handled separately
-        }
-
         public void OnMaterial(MaterialNode node)
         {
-            _currentMaterial = node;
+            _currentMaterialData = ExtractMaterialData(node);
+            _currentMaterialKey = _currentMaterialData.GetKey();
         }
 
         public void OnPolymesh(PolymeshTopology polymesh)
@@ -192,173 +189,208 @@ namespace DTExtractor.Core
 
             try
             {
-                var points = polymesh.GetPoints();
+                var pts = polymesh.GetPoints();
                 var facets = polymesh.GetFacets();
+                if (pts.Count == 0 || facets.Count == 0) return;
 
-                if (points.Count == 0 || facets.Count == 0)
-                    return;
+                var matKey = _currentMaterialKey ?? MaterialData.Default.GetKey();
+                if (!_elementGeometry.TryGetValue(matKey, out var buf))
+                {
+                    buf = new ElementGeometryBuffer { MaterialData = _currentMaterialData ?? MaterialData.Default };
+                    _elementGeometry[matKey] = buf;
+                }
+
+                var transform = CurrentTransform;
+
+                var worldPts = new XYZ[pts.Count];
+                for (int i = 0; i < pts.Count; i++)
+                    worldPts[i] = transform.OfPoint(pts[i]);
 
                 IList<XYZ> rawNormals = null;
-                DistributionOfNormals distribution = DistributionOfNormals.OnEachFacet;
+                var dist = DistributionOfNormals.OnEachFacet;
                 try
                 {
-                    distribution = polymesh.DistributionOfNormals;
+                    dist = polymesh.DistributionOfNormals;
                     rawNormals = polymesh.GetNormals();
                 }
                 catch { }
 
-                IList<UV> rawUvs = null;
-                try { rawUvs = polymesh.GetUVs(); }
-                catch { }
+                IList<UV> rawUVs = null;
+                try { rawUVs = polymesh.GetUVs(); } catch { }
 
-                List<XYZ> vertices;
-                List<XYZ> normalsList;
-                List<UV> uvList;
-                List<int> indices;
+                int baseVertex = buf.VertexCount;
 
-                if (rawNormals != null && distribution == DistributionOfNormals.AtEachPoint)
+                if (rawNormals != null && dist == DistributionOfNormals.AtEachPoint)
                 {
-                    vertices = points.ToList();
-                    normalsList = rawNormals.ToList();
-                    uvList = rawUvs != null && rawUvs.Count > 0 ? rawUvs.Cast<UV>().ToList() : null;
-                    indices = new List<int>(facets.Count * 3);
-                    for (int i = 0; i < facets.Count; i++)
+                    for (int i = 0; i < worldPts.Length; i++)
                     {
-                        indices.Add(facets[i].V1);
-                        indices.Add(facets[i].V2);
-                        indices.Add(facets[i].V3);
-                    }
-                }
-                else
-                {
-                    vertices = new List<XYZ>(facets.Count * 3);
-                    normalsList = new List<XYZ>(facets.Count * 3);
-                    uvList = rawUvs != null && rawUvs.Count > 0 ? new List<UV>(facets.Count * 3) : null;
-                    indices = new List<int>(facets.Count * 3);
+                        buf.AddPosition(worldPts[i]);
 
-                    for (int fi = 0; fi < facets.Count; fi++)
-                    {
-                        var facet = facets[fi];
-                        int baseIdx = vertices.Count;
-
-                        var p0 = points[facet.V1];
-                        var p1 = points[facet.V2];
-                        var p2 = points[facet.V3];
-                        vertices.Add(p0);
-                        vertices.Add(p1);
-                        vertices.Add(p2);
-
-                        if (rawNormals == null)
+                        if (i < rawNormals.Count)
                         {
-                            var edge1 = p1 - p0;
-                            var edge2 = p2 - p0;
-                            var cross = edge1.CrossProduct(edge2);
-                            var normal = cross.GetLength() > 1e-10 ? cross.Normalize() : XYZ.BasisZ;
-                            normalsList.Add(normal);
-                            normalsList.Add(normal);
-                            normalsList.Add(normal);
-                        }
-                        else if (distribution == DistributionOfNormals.OnePerFace)
-                        {
-                            var n = rawNormals[0];
-                            normalsList.Add(n);
-                            normalsList.Add(n);
-                            normalsList.Add(n);
+                            var tn = transform.OfVector(rawNormals[i]);
+                            buf.AddNormal(tn.GetLength() > 1e-10 ? tn.Normalize() : XYZ.BasisZ);
                         }
                         else
                         {
-                            normalsList.Add(rawNormals[fi * 3]);
-                            normalsList.Add(rawNormals[fi * 3 + 1]);
-                            normalsList.Add(rawNormals[fi * 3 + 2]);
+                            buf.AddNormal(XYZ.BasisZ);
                         }
 
-                        if (uvList != null)
-                        {
-                            uvList.Add(rawUvs.Count > facet.V1 ? rawUvs[facet.V1] : new UV(0, 0));
-                            uvList.Add(rawUvs.Count > facet.V2 ? rawUvs[facet.V2] : new UV(0, 0));
-                            uvList.Add(rawUvs.Count > facet.V3 ? rawUvs[facet.V3] : new UV(0, 0));
-                        }
-
-                        indices.Add(baseIdx);
-                        indices.Add(baseIdx + 1);
-                        indices.Add(baseIdx + 2);
+                        if (rawUVs != null && i < rawUVs.Count)
+                            buf.AddUV(rawUVs[i]);
                     }
-                }
 
-                string meshHash = ComputeMeshHash(points, facets);
-                var currentTransform = _transformStack.Count > 0 ? _transformStack.Peek() : Transform.Identity;
-
-                if (_meshHashMap.ContainsKey(meshHash))
-                {
-                    _gltfBuilder.AddInstance(_meshHashMap[meshHash], currentTransform, _currentGuid, _currentName);
+                    foreach (var facet in facets)
+                    {
+                        buf.Indices.Add(baseVertex + facet.V1);
+                        buf.Indices.Add(baseVertex + facet.V2);
+                        buf.Indices.Add(baseVertex + facet.V3);
+                    }
                 }
                 else
                 {
-                    var materialData = ExtractMaterialData(_currentMaterial);
-                    int meshIndex = _gltfBuilder.AddMesh(vertices, normalsList, uvList, indices, materialData);
-                    _meshHashMap[meshHash] = meshIndex;
-                    _gltfBuilder.AddInstance(meshIndex, currentTransform, _currentGuid, _currentName);
-                }
+                    for (int fi = 0; fi < facets.Count; fi++)
+                    {
+                        var facet = facets[fi];
+                        var p0 = worldPts[facet.V1];
+                        var p1 = worldPts[facet.V2];
+                        var p2 = worldPts[facet.V3];
 
-                _currentElementHasGeometry = true;
+                        buf.AddPosition(p0);
+                        buf.AddPosition(p1);
+                        buf.AddPosition(p2);
+
+                        XYZ faceNormal;
+                        if (rawNormals == null)
+                        {
+                            faceNormal = ComputeFaceNormal(p0, p1, p2);
+                        }
+                        else if (dist == DistributionOfNormals.OnePerFace && rawNormals.Count > 0)
+                        {
+                            var tn = transform.OfVector(rawNormals[0]);
+                            faceNormal = tn.GetLength() > 1e-10 ? tn.Normalize() : ComputeFaceNormal(p0, p1, p2);
+                        }
+                        else if (dist == DistributionOfNormals.OnEachFacet && fi < rawNormals.Count)
+                        {
+                            var tn = transform.OfVector(rawNormals[fi]);
+                            faceNormal = tn.GetLength() > 1e-10 ? tn.Normalize() : ComputeFaceNormal(p0, p1, p2);
+                        }
+                        else
+                        {
+                            faceNormal = ComputeFaceNormal(p0, p1, p2);
+                        }
+
+                        buf.AddNormal(faceNormal);
+                        buf.AddNormal(faceNormal);
+                        buf.AddNormal(faceNormal);
+
+                        if (rawUVs != null && rawUVs.Count > 0)
+                        {
+                            buf.AddUV(facet.V1 < rawUVs.Count ? rawUVs[facet.V1] : new UV(0, 0));
+                            buf.AddUV(facet.V2 < rawUVs.Count ? rawUVs[facet.V2] : new UV(0, 0));
+                            buf.AddUV(facet.V3 < rawUVs.Count ? rawUVs[facet.V3] : new UV(0, 0));
+                        }
+
+                        int bi = baseVertex + fi * 3;
+                        buf.Indices.Add(bi);
+                        buf.Indices.Add(bi + 1);
+                        buf.Indices.Add(bi + 2);
+                    }
+                }
             }
             catch (Exception ex)
             {
                 _polymeshFailCount++;
-                try
+                if (_polymeshFailCount <= 100 || _polymeshFailCount % 1000 == 0)
                 {
                     var stLines = ex.StackTrace?.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
                     var firstLine = stLines != null && stLines.Length > 0 ? stLines[0].Trim() : "N/A";
-                    System.IO.File.AppendAllText(_logPath,
-                        $"[{DateTime.Now:HH:mm:ss}] OnPolymesh failed for {_currentGuid}: [{ex.GetType().FullName}] {ex.Message}\r\n" +
-                        $"  at: {firstLine}\r\n");
+                    LogError($"OnPolymesh failed for {_currentGuid}: [{ex.GetType().Name}] {ex.Message}");
+                    LogError($"  at: {firstLine}");
+                    if (_polymeshFailCount % 100 == 0) _logWriter.Flush();
                 }
-                catch { }
             }
         }
 
-        public void OnRPC(RPCNode node)
+        public RenderNodeAction OnInstanceBegin(InstanceNode node)
         {
-            // RPC nodes not supported
-        }
-
-        public RenderNodeAction OnFaceBegin(FaceNode node)
-        {
+            try
+            {
+                _transformStack.Push(CurrentTransform.Multiply(node.GetTransform()));
+            }
+            catch (Exception ex)
+            {
+                LogError($"OnInstanceBegin failed: {ex.Message}");
+                _transformStack.Push(CurrentTransform);
+            }
             return RenderNodeAction.Proceed;
         }
 
-        public void OnFaceEnd(FaceNode node)
+        public void OnInstanceEnd(InstanceNode node)
         {
+            if (_transformStack.Count > 1)
+                _transformStack.Pop();
         }
 
         public RenderNodeAction OnLinkBegin(LinkNode node)
         {
+            _isLink = true;
+            _currentDoc = node.GetDocument();
+
+            if (_linkTransform != null)
+                _transformStack.Push(CurrentTransform.Multiply(_linkTransform));
+            else
+                _transformStack.Push(CurrentTransform);
+
             return RenderNodeAction.Proceed;
         }
 
         public void OnLinkEnd(LinkNode node)
         {
+            _isLink = false;
+            if (_transformStack.Count > 1)
+                _transformStack.Pop();
+            _currentDoc = _hostDoc;
         }
 
-        private string ComputeMeshHash(IList<XYZ> points, IList<PolymeshFacet> facets)
+        public void OnRPC(RPCNode node) { }
+        public void OnLight(LightNode node) { }
+        public RenderNodeAction OnFaceBegin(FaceNode node) => RenderNodeAction.Proceed;
+        public void OnFaceEnd(FaceNode node) { }
+
+        #endregion
+
+        #region Serialization
+
+        public void Serialize()
         {
-            using (var sha256 = SHA256.Create())
-            {
-                var sb = new StringBuilder();
-                for (int i = 0; i < Math.Min(10, points.Count); i++)
-                {
-                    sb.Append($"{points[i].X:F3},{points[i].Y:F3},{points[i].Z:F3};");
-                }
-                sb.Append($"|{points.Count}|{facets.Count}");
-                for (int i = 0; i < Math.Min(10, facets.Count); i++)
-                {
-                    sb.Append($"|{facets[i].V1},{facets[i].V2},{facets[i].V3}");
-                }
+            LogError("Writing GLB and Parquet...");
 
-                var hashBytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(sb.ToString()));
-                return Convert.ToBase64String(hashBytes);
+            _gltfBuilder.SerializeToGlb();
+            LogError("GLB written.");
+
+            _metadataCollector.SerializeToParquet(_outputPath);
+
+            var parquetGuids = _metadataCollector.GetAllGuids();
+            var gltfGuids = _gltfBuilder.GetAllGuids();
+
+            LogError($"Parquet written. records={parquetGuids.Count}, geometry_nodes={gltfGuids.Count}, failures={_polymeshFailCount}/{_polymeshCount}");
+
+            if (gltfGuids.Count > 0 && !gltfGuids.SetEquals(parquetGuids))
+            {
+                var onlyInGlb = new HashSet<string>(gltfGuids);
+                onlyInGlb.ExceptWith(parquetGuids);
+                var onlyInPq = new HashSet<string>(parquetGuids);
+                onlyInPq.ExceptWith(gltfGuids);
+                LogError($"GUID coverage: only_in_GLB={onlyInGlb.Count}, only_in_Parquet={onlyInPq.Count}");
             }
+
+            _logWriter.Flush();
         }
+
+        #endregion
+
+        #region Material Extraction
 
         private MaterialData ExtractMaterialData(MaterialNode materialNode)
         {
@@ -367,16 +399,54 @@ namespace DTExtractor.Core
 
             try
             {
+                float r = materialNode.Color.Red / 255f;
+                float g = materialNode.Color.Green / 255f;
+                float b = materialNode.Color.Blue / 255f;
+                float transparency = (float)materialNode.Transparency;
+                float metallic = 0f;
+                float roughness = 1f - (materialNode.Smoothness / 100f);
+
+                try
+                {
+                    if (materialNode.MaterialId != ElementId.InvalidElementId)
+                    {
+                        var material = _currentDoc.GetElement(materialNode.MaterialId) as Material;
+                        if (material != null && material.IsValidObject)
+                        {
+                            var appAssetId = material.AppearanceAssetId;
+                            if (appAssetId != ElementId.InvalidElementId)
+                            {
+                                var appElement = _currentDoc.GetElement(appAssetId) as AppearanceAssetElement;
+                                if (appElement != null)
+                                {
+                                    var asset = appElement.GetRenderingAsset();
+                                    if (asset != null)
+                                    {
+                                        var appColor = GetAppearanceColor(asset);
+                                        if (appColor != null)
+                                        {
+                                            r = appColor[0];
+                                            g = appColor[1];
+                                            b = appColor[2];
+                                        }
+
+                                        ExtractPbrProperties(asset, ref metallic, ref roughness);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                catch { }
+
+                roughness = Math.Max(0f, Math.Min(1f, roughness));
+
                 return new MaterialData
                 {
-                    Color = new double[]
-                    {
-                        materialNode.Color.Red / 255.0,
-                        materialNode.Color.Green / 255.0,
-                        materialNode.Color.Blue / 255.0
-                    },
-                    Transparency = materialNode.Transparency,
-                    Smoothness = materialNode.Smoothness
+                    Color = new float[] { r, g, b },
+                    Transparency = transparency,
+                    Metallic = metallic,
+                    Roughness = roughness
                 };
             }
             catch
@@ -385,23 +455,169 @@ namespace DTExtractor.Core
             }
         }
 
+        private float[] GetAppearanceColor(Asset asset)
+        {
+            try
+            {
+                var baseSchema = asset.FindByName("BaseSchema") as AssetPropertyString;
+                if (baseSchema == null || string.IsNullOrEmpty(baseSchema.Value))
+                    return null;
+
+                if (!ColorPropertyMap.TryGetValue(baseSchema.Value, out var propName))
+                    return null;
+
+                var colorProp = asset.FindByName(propName) as AssetPropertyDoubleArray4d;
+                if (colorProp == null) return null;
+
+                var values = colorProp.GetValueAsDoubles();
+                if (values == null || values.Count < 3) return null;
+
+                return new float[] { (float)values[0], (float)values[1], (float)values[2] };
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private void ExtractPbrProperties(Asset asset, ref float metallic, ref float roughness)
+        {
+            try
+            {
+                var metalProp = asset.FindByName("generic_is_metal");
+                if (metalProp is AssetPropertyBoolean boolProp)
+                    metallic = boolProp.Value ? 1f : 0f;
+                else if (metalProp is AssetPropertyInteger intProp)
+                    metallic = intProp.Value > 0 ? 1f : 0f;
+            }
+            catch { }
+
+            try
+            {
+                var glossProp = asset.FindByName("generic_glossiness") as AssetPropertyDouble;
+                if (glossProp != null)
+                    roughness = 1f - (float)glossProp.Value;
+            }
+            catch { }
+        }
+
+        #endregion
+
+        #region Helpers
+
+        private static XYZ ComputeFaceNormal(XYZ p0, XYZ p1, XYZ p2)
+        {
+            var edge1 = p1 - p0;
+            var edge2 = p2 - p0;
+            var cross = edge1.CrossProduct(edge2);
+            return cross.GetLength() > 1e-10 ? cross.Normalize() : XYZ.BasisZ;
+        }
+
+        public void LogError(string message)
+        {
+            if (_logClosed) return;
+            _logWriter.WriteLine($"[{DateTime.Now:HH:mm:ss}] {message}");
+        }
+
+        public void LogTiming(double exportSeconds, double serializeSeconds)
+        {
+            if (_logClosed) return;
+            _logWriter.WriteLine($"[{DateTime.Now:HH:mm:ss}] Export() took {exportSeconds:F1}s, Serialize() took {serializeSeconds:F1}s. elements={_elementCount}, polymeshes={_polymeshCount}");
+            _logWriter.Flush();
+        }
+
+        public void CloseLog()
+        {
+            if (_logClosed) return;
+            try { _logWriter?.Close(); } catch { }
+            _logClosed = true;
+        }
+
         public List<DTElementRecord> GetExtractedRecords()
         {
             return _metadataCollector.GetAllRecords();
         }
+
+        #endregion
     }
 
     public class MaterialData
     {
-        public double[] Color { get; set; }
-        public double Transparency { get; set; }
-        public double Smoothness { get; set; }
+        public float[] Color { get; set; }
+        public float Transparency { get; set; }
+        public float Metallic { get; set; }
+        public float Roughness { get; set; }
+
+        public string GetKey()
+        {
+            return $"{Color[0]:F3}_{Color[1]:F3}_{Color[2]:F3}_{Transparency:F3}_{Metallic:F2}_{Roughness:F2}";
+        }
 
         public static MaterialData Default => new MaterialData
         {
-            Color = new double[] { 0.8, 0.8, 0.8 },
-            Transparency = 0.0,
-            Smoothness = 0.5
+            Color = new float[] { 0.8f, 0.8f, 0.8f },
+            Transparency = 0f,
+            Metallic = 0f,
+            Roughness = 0.5f
         };
+    }
+
+    public class ElementGeometryBuffer
+    {
+        public readonly List<float> Positions = new List<float>();
+        public readonly List<float> Normals = new List<float>();
+        public readonly List<float> UVs = new List<float>();
+        public readonly List<int> Indices = new List<int>();
+        public MaterialData MaterialData;
+
+        public int VertexCount => Positions.Count / 3;
+        public bool HasUVs => UVs.Count > 0;
+
+        public void AddPosition(XYZ p)
+        {
+            Positions.Add((float)p.X);
+            Positions.Add((float)p.Y);
+            Positions.Add((float)p.Z);
+        }
+
+        public void AddNormal(XYZ n)
+        {
+            Normals.Add((float)n.X);
+            Normals.Add((float)n.Y);
+            Normals.Add((float)n.Z);
+        }
+
+        public void AddUV(UV uv)
+        {
+            UVs.Add((float)uv.U);
+            UVs.Add((float)(1.0 - uv.V));
+        }
+
+        public Vector3[] GetPositionArray()
+        {
+            var arr = new Vector3[VertexCount];
+            for (int i = 0; i < arr.Length; i++)
+                arr[i] = new Vector3(Positions[i * 3], Positions[i * 3 + 1], Positions[i * 3 + 2]);
+            return arr;
+        }
+
+        public Vector3[] GetNormalArray()
+        {
+            int count = Normals.Count / 3;
+            var arr = new Vector3[count];
+            for (int i = 0; i < count; i++)
+                arr[i] = new Vector3(Normals[i * 3], Normals[i * 3 + 1], Normals[i * 3 + 2]);
+            return arr;
+        }
+
+        public Vector2[] GetUVArray()
+        {
+            if (UVs.Count == 0) return null;
+            int count = UVs.Count / 2;
+            var arr = new Vector2[count];
+            for (int i = 0; i < count; i++)
+                arr[i] = new Vector2(UVs[i * 2], UVs[i * 2 + 1]);
+            return arr;
+        }
     }
 }

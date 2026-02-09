@@ -13,6 +13,51 @@ namespace DTExtractor.Commands
     [Regeneration(RegenerationOption.Manual)]
     public class ExportCommand : IExternalCommand
     {
+        private class ExportProgressIndicator : IDTProgressIndicator, IDisposable
+        {
+            private readonly string _logPath;
+            private int _lastReportedPercent = -1;
+            private readonly Stopwatch _timer;
+            private readonly StreamWriter _logWriter;
+            private bool _disposed;
+
+            public ExportProgressIndicator(string logPath)
+            {
+                _logPath = logPath;
+                _timer = Stopwatch.StartNew();
+                _logWriter = new StreamWriter(_logPath + ".progress", false);
+                _logWriter.AutoFlush = true;
+            }
+
+            public void Report(int current, int total)
+            {
+                if (total <= 0) return;
+
+                int percent = (int)((current * 100.0) / total);
+                if (percent != _lastReportedPercent && percent % 5 == 0)
+                {
+                    _lastReportedPercent = percent;
+                    var elapsed = _timer.Elapsed;
+                    _logWriter.WriteLine($"[{DateTime.Now:HH:mm:ss}] Progress: {percent}% ({current}/{total}) - Elapsed: {elapsed.TotalSeconds:F1}s");
+                }
+            }
+
+            public void Close()
+            {
+                if (_disposed) return;
+
+                var totalTime = _timer.Elapsed.TotalSeconds;
+                _logWriter.WriteLine($"[{DateTime.Now:HH:mm:ss}] Export phase ended. Total time: {totalTime:F1}s");
+
+                _logWriter.Close();
+                _disposed = true;
+            }
+
+            public void Dispose()
+            {
+                Close();
+            }
+        }
         public Result Execute(
             ExternalCommandData commandData,
             ref string message,
@@ -28,6 +73,7 @@ namespace DTExtractor.Commands
             }
 
             string outputPath = null;
+            DTGeometryExporter exporter = null;
             try
             {
                 using (var saveDialog = new SaveFileDialog())
@@ -48,36 +94,60 @@ namespace DTExtractor.Commands
                         return Result.Failed;
                     }
 
-                    var exporter = new DTGeometryExporter(doc, outputPath);
+                    exporter = new DTGeometryExporter(doc, outputPath);
                     var exportLogPath = Path.ChangeExtension(outputPath, ".export-log.txt");
                     bool exportHadError = false;
+                    Exception exportException = null;
 
                     var swExport = Stopwatch.StartNew();
+                    using (var progressIndicator = new ExportProgressIndicator(exportLogPath))
                     using (var customExporter = new CustomExporter(doc, exporter))
                     {
                         customExporter.IncludeGeometricObjects = false;
                         customExporter.ShouldStopOnError = false;
+                        
                         try
                         {
+                            exporter.SetProgressIndicator(progressIndicator);
                             customExporter.Export(view3D);
                         }
                         catch (Autodesk.Revit.Exceptions.InvalidObjectException ioEx)
                         {
                             exportHadError = true;
-                            try { File.AppendAllText(exportLogPath, $"[{DateTime.Now:HH:mm:ss}] Export() hit invalid object (continuing with partial data): {ioEx.Message}\r\n"); } catch { }
+                            exportException = ioEx;
+                            exporter.LogError($"InvalidObjectException during Export: {ioEx.Message}");
+                        }
+                        catch (Exception ex)
+                        {
+                            exportHadError = true;
+                            exportException = ex;
+                            exporter.LogError($"Unexpected exception during Export: [{ex.GetType().Name}] {ex.Message}");
+                            exporter.LogError($"StackTrace: {ex.StackTrace}");
                         }
                     }
                     swExport.Stop();
 
-                    var swSerialize = Stopwatch.StartNew();
-                    exporter.Serialize();
-                    swSerialize.Stop();
+                    exporter.LogError($"Export phase completed. Had error: {exportHadError}, Elements: {exporter.ElementCount}, Polymeshes: {exporter.PolymeshCount}");
 
+                    var swSerialize = Stopwatch.StartNew();
                     try
                     {
-                        File.AppendAllText(exportLogPath, $"[{DateTime.Now:HH:mm:ss}] Export() took {swExport.Elapsed.TotalSeconds:F1}s, Serialize() took {swSerialize.Elapsed.TotalSeconds:F1}s. elements={exporter.ElementCount}, polymeshes={exporter.PolymeshCount}\r\n");
+                        exporter.LogError("Starting Serialize phase...");
+                        exporter.Serialize();
+                        swSerialize.Stop();
+                        exporter.LogTiming(swExport.Elapsed.TotalSeconds, swSerialize.Elapsed.TotalSeconds);
                     }
-                    catch { }
+                    catch (Exception ex)
+                    {
+                        swSerialize.Stop();
+                        exporter.LogError($"FATAL: Serialize failed: [{ex.GetType().Name}] {ex.Message}");
+                        exporter.LogError($"StackTrace: {ex.StackTrace}");
+                        
+                        TaskDialog.Show(
+                            "Serialize Error",
+                            $"Failed to write output files:\n\n{ex.Message}\n\nCheck {Path.GetFileName(exportLogPath)} for details.");
+                        return Result.Failed;
+                    }
 
                     var glbPath = Path.ChangeExtension(outputPath, ".glb");
                     var parquetPath = Path.ChangeExtension(outputPath, ".parquet");
@@ -131,6 +201,10 @@ namespace DTExtractor.Commands
                     : "";
                 TaskDialog.Show("Export Error", $"An error occurred during export:\n\n{ex.Message}\n\n{ex.StackTrace}{logHint}");
                 return Result.Failed;
+            }
+            finally
+            {
+                exporter?.CloseLog();
             }
         }
 

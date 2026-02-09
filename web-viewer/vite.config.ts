@@ -14,6 +14,6 @@ export default defineConfig({
         outDir: "dist",
     },
     optimizeDeps: {
-        exclude: ["duckdb-wasm"],
+        exclude: ["@duckdb/duckdb-wasm"],
     },
 });

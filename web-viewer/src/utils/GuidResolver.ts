@@ -1,9 +1,5 @@
 import * as THREE from "three";
 
-/**
- * GUID-based object picking via raycasting
- * Resolves 2D screen coordinates to 3D BIM elements
- */
 export class GuidResolver {
     private raycaster = new THREE.Raycaster();
     private mouse = new THREE.Vector2();
@@ -15,26 +11,15 @@ export class GuidResolver {
         this.meshToGuid = meshToGuid;
     }
 
-    /**
-     * Pick object at screen coordinates
-     * Returns GUID if hit, null otherwise
-     */
-    pick(x: number, y: number, camera: THREE.Camera, scene: THREE.Scene): string | null {
-        // Normalize mouse coordinates to [-1, 1]
-        this.mouse.x = (x / window.innerWidth) * 2 - 1;
-        this.mouse.y = -(y / window.innerHeight) * 2 + 1;
-
-        // Update raycaster
+    pick(ndcX: number, ndcY: number, camera: THREE.Camera, scene: THREE.Scene): string | null {
+        this.mouse.x = ndcX;
+        this.mouse.y = ndcY;
         this.raycaster.setFromCamera(this.mouse, camera);
 
-        // Intersect with scene
         const intersects = this.raycaster.intersectObjects(scene.children, true);
 
         if (intersects.length > 0) {
-            const firstHit = intersects[0];
-            const hitObject = firstHit.object;
-
-            // Traverse up to find object with GUID
+            const hitObject = intersects[0].object;
             let current: THREE.Object3D | null = hitObject;
             while (current) {
                 const guid = this.meshToGuid.get(current);
@@ -48,50 +33,42 @@ export class GuidResolver {
         return null;
     }
 
-    /**
-     * Highlight object by GUID
-     */
     highlightByGuid(guid: string, color: number = 0x4a9eff): void {
-        const mesh = this.guidToMesh.get(guid);
-        if (mesh && mesh instanceof THREE.Mesh) {
-            // Store original material
-            if (!(mesh as any)._originalMaterial) {
-                (mesh as any)._originalMaterial = mesh.material;
+        const object = this.guidToMesh.get(guid);
+        if (!object) return;
+
+        const highlightMaterial = new THREE.MeshStandardMaterial({
+            color: color,
+            emissive: color,
+            emissiveIntensity: 0.25,
+            metalness: 0.2,
+            roughness: 0.6,
+        });
+
+        object.traverse((node) => {
+            if (node instanceof THREE.Mesh) {
+                if (!(node as any)._originalMaterial) {
+                    (node as any)._originalMaterial = node.material;
+                }
+                node.material = highlightMaterial;
             }
-
-            // Apply highlight material
-            const highlightMaterial = new THREE.MeshStandardMaterial({
-                color: color,
-                emissive: color,
-                emissiveIntensity: 0.3,
-                metalness: 0.2,
-                roughness: 0.6,
-            });
-
-            mesh.material = highlightMaterial;
-        }
+        });
     }
 
-    /**
-     * Clear all highlights
-     */
     clearHighlight(guid?: string): void {
-        if (guid) {
-            const mesh = this.guidToMesh.get(guid);
-            if (mesh && mesh instanceof THREE.Mesh) {
-                if ((mesh as any)._originalMaterial) {
-                    mesh.material = (mesh as any)._originalMaterial;
-                    delete (mesh as any)._originalMaterial;
-                }
-            }
-        } else {
-            // Clear all highlights
-            this.meshToGuid.forEach((guid, mesh) => {
-                if (mesh instanceof THREE.Mesh && (mesh as any)._originalMaterial) {
-                    mesh.material = (mesh as any)._originalMaterial;
-                    delete (mesh as any)._originalMaterial;
+        const clearOne = (obj: THREE.Object3D) => {
+            obj.traverse((node) => {
+                if (node instanceof THREE.Mesh && (node as any)._originalMaterial) {
+                    node.material = (node as any)._originalMaterial;
+                    delete (node as any)._originalMaterial;
                 }
             });
+        };
+        if (guid) {
+            const object = this.guidToMesh.get(guid);
+            if (object) clearOne(object);
+        } else {
+            this.meshToGuid.forEach((_, obj) => clearOne(obj));
         }
     }
 }

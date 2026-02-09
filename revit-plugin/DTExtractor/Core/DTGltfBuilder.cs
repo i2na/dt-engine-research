@@ -1,132 +1,99 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Numerics;
 using System.Text.Json.Nodes;
-using Autodesk.Revit.DB;
 using SharpGLTF.Materials;
 using SharpGLTF.Schema2;
 
 namespace DTExtractor.Core
 {
-    /// <summary>
-    /// Builds glTF 2.0 with Draco compression and GPU instancing
-    /// Embeds GUID in EXT_structural_metadata
-    /// </summary>
     public class DTGltfBuilder
     {
-        public string OutputPath { get; private set; }
+        public string OutputPath { get; }
 
         private readonly ModelRoot _model;
         private readonly Scene _scene;
-        private readonly Dictionary<int, SharpGLTF.Schema2.Mesh> _meshes;
-        private readonly Dictionary<string, SharpGLTF.Schema2.Material> _materialMap;
-        private readonly List<string> _guidList;
-
-        private int _nextMeshId = 0;
+        private readonly Dictionary<string, Material> _materialCache;
+        private readonly HashSet<string> _guidSet;
 
         public DTGltfBuilder(string outputPath)
         {
             OutputPath = outputPath;
             _model = ModelRoot.CreateModel();
             _scene = _model.UseScene("default");
-            _meshes = new Dictionary<int, SharpGLTF.Schema2.Mesh>();
-            _materialMap = new Dictionary<string, SharpGLTF.Schema2.Material>();
-            _guidList = new List<string>();
+            _materialCache = new Dictionary<string, Material>();
+            _guidSet = new HashSet<string>();
         }
 
-        public int AddMesh(
-            List<XYZ> vertices,
-            List<XYZ> normals,
-            List<UV> uvs,
-            List<int> indices,
-            MaterialData materialData)
+        public void AddElement(string guid, string name, Dictionary<string, ElementGeometryBuffer> geometry)
         {
-            int meshId = _nextMeshId++;
-
-            var positions = new Vector3[vertices.Count];
-            var normalVecs = new Vector3[vertices.Count];
-            for (int i = 0; i < vertices.Count; i++)
-            {
-                positions[i] = ToVector3(vertices[i]);
-                normalVecs[i] = normals != null && i < normals.Count
-                    ? ToVector3(normals[i])
-                    : Vector3.UnitZ;
-            }
-
-            var material = GetOrCreateMaterial(materialData);
-
-            var mesh = _model.CreateMesh("mesh_" + meshId);
-            var prim = mesh.CreatePrimitive()
-                .WithVertexAccessor("POSITION", positions)
-                .WithVertexAccessor("NORMAL", normalVecs)
-                .WithIndicesAccessor(PrimitiveType.TRIANGLES, indices.ToArray())
-                .WithMaterial(material);
-
-            if (uvs != null && uvs.Count > 0)
-            {
-                var texcoords = new Vector2[vertices.Count];
-                for (int i = 0; i < vertices.Count; i++)
-                    texcoords[i] = i < uvs.Count ? ToVector2(uvs[i]) : Vector2.Zero;
-                prim.WithVertexAccessor("TEXCOORD_0", texcoords);
-            }
-
-            _meshes[meshId] = mesh;
-            return meshId;
-        }
-
-        public void AddInstance(int meshId, Transform transform, string guid, string name)
-        {
-            if (!_meshes.ContainsKey(meshId))
+            if (string.IsNullOrEmpty(guid) || geometry == null || geometry.Count == 0)
                 return;
 
-            _guidList.Add(guid);
+            var mesh = _model.CreateMesh(guid);
 
-            var instanceNode = _scene.CreateNode($"inst_{guid}_{_guidList.Count}");
-            instanceNode.WithMesh(_meshes[meshId]);
+            foreach (var kvp in geometry)
+            {
+                var buf = kvp.Value;
+                if (buf.VertexCount == 0 || buf.Indices.Count == 0)
+                    continue;
+
+                var positions = buf.GetPositionArray();
+                var normals = buf.GetNormalArray();
+                var indices = buf.Indices.ToArray();
+                var material = GetOrCreateMaterial(buf.MaterialData);
+
+                var prim = mesh.CreatePrimitive()
+                    .WithVertexAccessor("POSITION", positions)
+                    .WithVertexAccessor("NORMAL", normals)
+                    .WithIndicesAccessor(PrimitiveType.TRIANGLES, indices)
+                    .WithMaterial(material);
+
+                var uvs = buf.GetUVArray();
+                if (uvs != null && uvs.Length == positions.Length)
+                    prim.WithVertexAccessor("TEXCOORD_0", uvs);
+            }
+
+            if (mesh.Primitives.Count == 0)
+                return;
+
+            var node = _scene.CreateNode(guid);
+            node.WithMesh(mesh);
 
             try
             {
-                var matrix = ToMatrix4x4(transform);
-                instanceNode.LocalMatrix = matrix;
-            }
-            catch
-            {
-                try
-                {
-                    var origin = transform.Origin;
-                    instanceNode.LocalMatrix = Matrix4x4.CreateTranslation(
-                        (float)origin.X, (float)origin.Y, (float)origin.Z);
-                }
-                catch { }
-            }
-
-            try
-            {
-                var json = Newtonsoft.Json.JsonConvert.SerializeObject(new { guid = guid, name = name });
-                instanceNode.Extras = JsonNode.Parse(json);
+                var json = Newtonsoft.Json.JsonConvert.SerializeObject(new { guid, name = name ?? "" });
+                node.Extras = JsonNode.Parse(json);
             }
             catch { }
+
+            _guidSet.Add(guid);
         }
 
-        private SharpGLTF.Schema2.Material GetOrCreateMaterial(MaterialData data)
+        private Material GetOrCreateMaterial(MaterialData data)
         {
-            string key = $"{data.Color[0]:F2}_{data.Color[1]:F2}_{data.Color[2]:F2}";
-
-            if (_materialMap.TryGetValue(key, out var cached))
+            var key = data.GetKey();
+            if (_materialCache.TryGetValue(key, out var cached))
                 return cached;
 
-            var builder = new MaterialBuilder($"mat_{_materialMap.Count}")
+            float lr = SrgbToLinear(data.Color[0]);
+            float lg = SrgbToLinear(data.Color[1]);
+            float lb = SrgbToLinear(data.Color[2]);
+            float alpha = 1f - data.Transparency;
+
+            var builder = new MaterialBuilder($"mat_{_materialCache.Count}")
                 .WithMetallicRoughnessShader()
-                .WithBaseColor(new Vector4(
-                    (float)data.Color[0],
-                    (float)data.Color[1],
-                    (float)data.Color[2],
-                    (float)(1.0 - data.Transparency)))
-                .WithMetallicRoughness(metallic: 0f, roughness: (float)(1.0 - data.Smoothness));
+                .WithBaseColor(new Vector4(lr, lg, lb, alpha))
+                .WithMetallicRoughness(
+                    metallic: data.Metallic,
+                    roughness: data.Roughness);
+
+            if (alpha < 0.999f)
+                builder.WithAlpha(SharpGLTF.Materials.AlphaMode.BLEND);
 
             var material = _model.CreateMaterial(builder);
-            _materialMap[key] = material;
+            material.DoubleSided = true;
+            _materialCache[key] = material;
             return material;
         }
 
@@ -139,51 +106,28 @@ namespace DTExtractor.Core
                 var json = Newtonsoft.Json.JsonConvert.SerializeObject(new
                 {
                     generator = "DTExtractor",
-                    version = "1.0.0",
-                    guidCount = _guidList.Count,
+                    version = "2.0.0",
+                    guidCount = _guidSet.Count,
                     extractedAt = DateTime.UtcNow.ToString("o")
                 });
                 _model.Extras = JsonNode.Parse(json);
             }
             catch { }
 
-            // Save with Draco compression (if available)
-            var settings = new SharpGLTF.Schema2.WriteSettings
-            {
-                JsonIndented = false
-            };
-
+            var settings = new WriteSettings { JsonIndented = false };
             _model.SaveGLB(glbPath, settings);
         }
 
         public HashSet<string> GetAllGuids()
         {
-            return new HashSet<string>(_guidList);
+            return new HashSet<string>(_guidSet);
         }
 
-        private Vector3 ToVector3(XYZ xyz)
+        private static float SrgbToLinear(float srgb)
         {
-            return new Vector3((float)xyz.X, (float)xyz.Y, (float)xyz.Z);
-        }
-
-        private Vector2 ToVector2(UV uv)
-        {
-            return new Vector2((float)uv.U, (float)uv.V);
-        }
-
-        private Matrix4x4 ToMatrix4x4(Transform transform)
-        {
-            var basis = transform.BasisX;
-            var basisY = transform.BasisY;
-            var basisZ = transform.BasisZ;
-            var origin = transform.Origin;
-
-            return new Matrix4x4(
-                (float)basis.X, (float)basis.Y, (float)basis.Z, 0f,
-                (float)basisY.X, (float)basisY.Y, (float)basisY.Z, 0f,
-                (float)basisZ.X, (float)basisZ.Y, (float)basisZ.Z, 0f,
-                (float)origin.X, (float)origin.Y, (float)origin.Z, 1f
-            );
+            return srgb <= 0.04045f
+                ? srgb / 12.92f
+                : (float)Math.Pow((srgb + 0.055f) / 1.055f, 2.4);
         }
     }
 }
