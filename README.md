@@ -1,255 +1,193 @@
-# DT Engine
+# DT engine research
+
+Revit 모델(.rvt)에서 3D 형상과 BIM 속성을 각각 최적 포맷으로 추출한 뒤, 고유 식별자(GUID)로 연결하여 브라우저에서 렌더링과 속성 조회를 하나의 시스템으로 수행하는 디지털 트윈 엔진이다.
+
+---
 
 ## 목차
 
-1. [시스템 요구사항](#1-시스템-요구사항)
-2. [Revit 플러그인 빌드 및 설치](#2-revit-플러그인-빌드-및-설치)
-3. [Revit 모델 내보내기](#3-revit-모델-내보내기)
-4. [웹 뷰어 실행](#4-웹-뷰어-실행)
-5. [주요 기능](#5-주요-기능)
-6. [문제 해결](#6-문제-해결)
+1. [핵심 아이디어: 이중 추출과 GUID 연결](#1-핵심-아이디어-이중-추출과-guid-연결)
+2. [데이터 파이프라인: Revit에서 GLB와 Parquet까지](#2-데이터-파이프라인-revit에서-glb와-parquet까지)
+3. [웹 뷰어: 렌더링과 속성 조회](#3-웹-뷰어-렌더링과-속성-조회)
+4. [평가](#4-평가)
+5. [Demo](#5-demo)
+6. [실행 방법](#6-실행-방법)
 
 <img width="3840" height="2160" alt="Image" src="https://github.com/user-attachments/assets/20997fc9-a31b-4424-8c5f-3856f280617f" />
 
 ---
 
-## 1. 시스템 요구사항
+## 전체 요약
 
-### Revit 플러그인
+이 엔진은 하나의 Revit 모델로부터 두 가지 산출물을 만들어낸다. GPU가 직접 소비하는 3D 형상 파일(GLB)과, SQL로 질의할 수 있는 컬럼 기반 속성 파일(Parquet)이다. 두 파일은 독립적인 포맷이지만, 모든 BIM 요소에 부여된 Revit UniqueId(GUID)가 양쪽에 동일하게 내장되어 있어 런타임에 결합된다. 사용자가 3D 모델에서 객체를 클릭하면 GUID를 매개로 해당 객체의 전체 Revit 파라미터가 즉시 조회되는 구조이다.
 
-- **Windows 10/11** (64-bit)
-- **Autodesk Revit 2024**
-- **.NET Framework 4.8**
-- **Visual Studio 2022** (빌드 시)
+추출은 Revit 내부에서 동작하는 C# 플러그인(DTExtractor)이 담당하며, 외부 클라우드 서비스 없이 로컬에서 완결된다. 조회와 렌더링은 Three.js 기반 웹 뷰어가 담당하고, DuckDB-WASM을 통해 브라우저 내에서 Parquet 파일에 직접 SQL을 실행한다.
 
-### 웹 뷰어
-
-- **Node.js v18+**
-- **브라우저**: Chrome 113+ / Edge 113+ / Firefox 141+ (WebGPU 지원)
-- **메모리**: 최소 4GB (권장 8GB)
-
----
-
-## 2. Revit 플러그인 빌드 및 설치
-
-### 2.1. Visual Studio 2022에서 빌드
-
-1. **프로젝트 열기**
-    - Visual Studio 2022 실행
-    - `File` → `Open` → `Project/Solution`
-    - `revit-plugin/DTExtractor/DTExtractor.csproj` 선택
-
-2. **빌드 구성 선택**
-    - 상단 Configuration 드롭다운에서 선택:
-        - `Debug-R2024` (개발용)
-        - `Release-R2024` (배포용)
-
-3. **빌드 실행**
-    - `Build` → `Build Solution` (또는 `Ctrl+Shift+B`)
-    - 빌드 완료 시 자동으로 Revit Addins 폴더에 배포됩니다:
-        ```
-        C:\Users\[사용자명]\AppData\Roaming\Autodesk\Revit\Addins\2024\
-        ```
-
-### 2.2. Revit에서 확인
-
-1. **Revit 2024 실행**
-2. **리본 메뉴 확인**
-    - 상단 리본에 `DT Engine` 탭 표시 확인
-    - `Export to DT Engine` 버튼 확인
-
-3. **플러그인 미표시 시**
-    - Revit 재시작
-    - 여전히 안 보이면 Addins 폴더에 파일 존재 확인:
-        - `DTExtractor.dll`
-        - `DTExtractor.addin`
-        - 의존 DLL들 (`SharpGLTF.Toolkit.dll`, `Parquet.Net.dll` 등)
+```mermaid
+flowchart LR
+    A["Revit .rvt<br/>원본 모델"] -->|"DTExtractor<br/>로컬 실행"| B["GLB<br/>3D 형상"]
+    A -->|"DTExtractor<br/>로컬 실행"| C["Parquet<br/>BIM 속성"]
+    B -->|"Three.js<br/>WebGL 2.0"| D["웹 뷰어"]
+    C -->|"DuckDB-WASM<br/>브라우저 SQL"| D
+    B ---|"GUID 연결"| C
+```
 
 ---
 
-## 3. Revit 모델 내보내기
+## 1. 핵심 아이디어: 이중 추출과 GUID 연결
 
-### 3.1. 준비
+### 왜 형상과 속성을 분리하는가
 
-1. **Revit에서 모델 열기**
-2. **3D 뷰 생성**
-    - `View` → `3D View` → `Default 3D View`
-    - 내보낼 요소가 모두 표시되는지 확인
+BIM 모델은 3D 형상과 수백 개의 파라미터 속성을 동시에 포함한다. 이 두 종류의 데이터는 소비 방식이 근본적으로 다르다. 형상 데이터는 GPU가 삼각형 메쉬 형태로 읽어야 하고, 속성 데이터는 조건 검색이나 통계 집계 같은 분석적 질의에 적합해야 한다. 하나의 포맷으로 양쪽을 모두 최적화하는 것은 불가능하므로, 각각의 소비자에게 맞는 포맷으로 분리 추출하는 것이 이 엔진의 출발점이다.
 
-### 3.2. 내보내기 실행
+- **GLB (glTF Binary)**: Khronos 국제 표준 3D 포맷으로, 브라우저와 Three.js가 네이티브로 지원한다. 정점, 법선, UV, 머티리얼을 바이너리로 묶어 GPU에 직접 전달한다.
+- **Apache Parquet**: 컬럼 기반 데이터 포맷으로, DuckDB-WASM이 브라우저에서 직접 SQL 질의를 수행할 수 있다. 수백 개의 파라미터 중 필요한 컬럼만 선택적으로 읽을 수 있어 전송량이 최소화된다.
 
-1. **Export 버튼 클릭**
-    - 리본 메뉴: `DT Engine` → `Export to DT Engine`
+### GUID가 연결하는 것
 
-2. **출력 경로 선택**
-    - 파일명 입력: **`model.glb`**
-    - **중요**: 웹 뷰어의 models 폴더에 저장:
-        ```
-        [프로젝트폴더]/web-viewer/public/models/model.glb
-        ```
+Revit의 모든 BIM 요소에는 UniqueId라는 고유 문자열이 존재한다. DTExtractor는 추출 과정에서 이 GUID를 GLB의 노드 메타데이터와 Parquet의 행 식별자 양쪽에 동일하게 기록한다. 웹 뷰어에서 사용자가 3D 객체를 클릭하면 레이캐스팅으로 해당 메쉬의 GUID를 식별하고, 이 GUID로 Parquet에서 전체 속성을 조회한다. 형상과 속성이 물리적으로 분리되어 있지만, GUID를 통해 런타임에 하나의 BIM 객체로 결합되는 것이다.
 
-3. **내보내기 완료**
-    - 완료 대화상자에서 파일 크기 확인
-    - 두 파일이 생성됩니다:
-        - `model.glb` (형상 데이터)
-        - `model.parquet` (메타데이터)
+```mermaid
+flowchart TD
+    A["Revit 요소<br/>UniqueId = GUID"] -->|"OnElementBegin 콜백"| B["GLB 노드<br/>userData.guid"]
+    A -->|"MetadataCollector"| C["Parquet 행<br/>guid 컬럼"]
+    B -->|"레이캐스팅으로 GUID 식별"| D["런타임 결합"]
+    C -->|"GUID로 SQL 조회"| D
+```
 
 ---
 
-## 4. 웹 뷰어 실행
+## 2. 데이터 파이프라인: Revit에서 GLB와 Parquet까지
 
-### 4.1. 의존성 설치
+### Revit 플러그인 DTExtractor
+
+DTExtractor는 Revit 내부에서 동작하는 C# .NET 플러그인이다. Revit API가 공식 제공하는 `CustomExporter`와 `IExportContext` 인터페이스를 활용하여, Revit의 내부 렌더링 파이프라인이 생성하는 테셀레이션된 메쉬 데이터를 콜백 방식으로 수신한다. 이 메커니즘은 Revit이 화면에 그리는 것과 동일한 형상 데이터를 외부로 꺼내는 공식 경로이며, 클라우드 변환 서비스 없이 로컬 PC에서 직접 실행된다.
+
+### 추출 과정
+
+사용자가 Revit 리본 메뉴에서 내보내기 버튼을 누르면 다음 과정이 진행된다.
+
+1. 활성 3D 뷰를 기반으로 CustomExporter가 모델 순회를 시작한다.
+2. 각 BIM 요소에 진입할 때(`OnElementBegin`) UniqueId를 GUID로 확보하고, 동시에 해당 요소의 파라미터 수집을 시작한다.
+3. 머티리얼 변경 시(`OnMaterial`) 색상, 투명도, 질감 정보를 기록한다. 50종 이상의 Revit 머티리얼 스키마를 개별적으로 매핑하여 색상을 추출한다.
+4. 테셀레이션된 삼각형 메쉬가 도착하면(`OnPolymesh`) 정점, 법선, UV 좌표를 수집하고, 메쉬 해시를 계산하여 동일 형상을 감지한다. 같은 패밀리 타입(문, 창문 등)은 동일한 메쉬를 공유하므로 인스턴싱으로 처리하여 파일 크기를 줄인다.
+5. 순회가 완료되면 SharpGLTF 라이브러리로 GLB 파일을, Parquet.Net 라이브러리로 Parquet 파일을 각각 직렬화한다.
+
+### 메타데이터 추출 범위
+
+Revit의 파라미터 체계는 단일 API 호출로 모두 접근할 수 없다. DTExtractor는 인스턴스 파라미터(`Element.Parameters`), 타입 파라미터(`Element.Symbol.Parameters`), BuiltIn 파라미터(`BuiltInParameter`), 공유 파라미터, 프로젝트 파라미터, 글로벌 파라미터, 패밀리 파라미터의 7종을 개별적으로 순회하여 하나의 Parquet 레코드에 통합한다. 수치 값은 Revit 내부 단위(피트, 라디안)를 원본 그대로 보존하여 변환 과정의 정밀도 손실을 방지한다.
+
+### 산출물
+
+하나의 Revit 모델에서 두 파일이 동시에 생성된다.
+
+| 산출물    | 포맷                  | 역할                                   | GUID 저장 위치          |
+| --------- | --------------------- | -------------------------------------- | ----------------------- |
+| 형상 파일 | GLB (glTF 2.0 Binary) | GPU 렌더링용 메쉬, 머티리얼, 노드 계층 | 노드의 `userData.guid`  |
+| 속성 파일 | Apache Parquet        | 전체 BIM 파라미터, SQL 질의 대상       | `guid` 컬럼 (행 식별자) |
+
+실제 테스트에서 racbasic 모델은 GLB 8MB + Parquet 147KB, snowdon 모델은 GLB 64MB + Parquet 934KB, factorial 모델은 GLB 166MB + Parquet 1.1MB로 추출되었다.
+
+---
+
+## 3. 웹 뷰어: 렌더링과 속성 조회
+
+### 렌더링 엔진
+
+웹 뷰어는 Three.js 기반의 WebGL 2.0 렌더러로 구현되어 있다. 렌더링 백엔드는 추상화 인터페이스(`IRenderBackend`)로 분리되어 있으며, WebGPU 가용 여부를 런타임에 감지하는 구조가 갖추어져 있다. 현재는 WebGL 2.0 백엔드가 동작하고, WebGPU 백엔드는 Three.js의 WebGPURenderer가 성숙하면 전환할 수 있도록 설계되어 있다.
+
+렌더링 기능으로는 PBR 머티리얼, 실시간 그림자(PCFSoftShadowMap), 후처리 효과(SSAO, Bloom, Outline), 톤 매핑(ACES Filmic) 등이 구현되어 있으며, Material, Wireframe, X-Ray 세 가지 렌더링 모드를 지원한다. 카메라는 Perspective와 Orthographic 간 전환이 가능하고, 모델별로 사전 정의된 카메라 프리셋으로 자동 애니메이션된다.
+
+### Click-to-Data: 4단 캐시 시스템
+
+이 엔진의 핵심 인터랙션은 사용자가 3D 객체를 클릭했을 때 해당 요소의 전체 Revit 파라미터가 표시되는 루프이다. 클릭 좌표에서 레이캐스팅으로 메쉬를 식별하고, 메쉬-GUID 매핑 테이블에서 GUID를 찾은 뒤, 4단 캐시 계층을 순차적으로 조회한다.
+
+```mermaid
+flowchart TD
+    A["사용자 클릭"] -->|"레이캐스팅"| B["GUID 식별"]
+    B --> C["L1: 인메모리 캐시<br/>GLB 로드 시 사전 적재<br/>0ms"]
+    C -->|"미스"| D["L2: IndexedDB<br/>이전 조회 결과 캐시<br/>5ms 이내"]
+    D -->|"미스"| E["L3: DuckDB-WASM<br/>Parquet 파일 직접 SQL<br/>100ms 이내"]
+    E -->|"결과를 L2, L1에 저장"| F["우측 패널에<br/>파라미터 표시"]
+```
+
+- **L1 (인메모리)**: GLB 로드 시 노드의 GUID와 카테고리 정보를 Map에 사전 적재한다. 즉시 접근 가능하지만 데이터가 제한적이다.
+- **L2 (IndexedDB)**: 이전에 L3에서 조회한 전체 메타데이터를 브라우저 로컬 스토리지에 캐시한다. 동일 객체 재클릭 시 Parquet 재질의 없이 응답한다.
+- **L3 (DuckDB-WASM)**: 브라우저 내 WebAssembly로 동작하는 DuckDB 엔진이 Parquet 파일에 직접 SQL을 실행한다. GUID 조건으로 단일 행을 조회하며, 결과를 L2와 L1에 역캐싱한다.
+- **L4 (서버 API)**: PostgreSQL 서버를 통한 교차 모델 참조나 변경 이력 조회를 위한 계층으로, 현재 인터페이스만 정의되어 있다.
+
+대부분의 속성 조회는 L1~L3 계층 내에서 서버 통신 없이 100ms 이내에 완료된다.
+
+### DuckDB-WASM의 역할
+
+DuckDB-WASM은 이 엔진에서 속성 질의 엔진으로 기능한다. 웹 뷰어가 초기화될 때 Web Worker에서 DuckDB 인스턴스를 생성하고, Parquet 파일의 URL을 등록한다. 이후 GUID 기반 단일 행 조회뿐 아니라 카테고리별 필터링이나 통계 집계 같은 분석적 SQL도 브라우저 내에서 실행할 수 있다. Parquet의 컬럼 기반 구조와 DuckDB의 벡터화 실행 엔진이 결합되어, 서버 없이도 수천 개의 BIM 요소에 대한 질의가 가능하다.
+
+---
+
+## 4. 평가
+
+### 강점
+
+**포맷 분리의 실효성.** 형상과 속성을 각각 GPU와 SQL 엔진에 최적화된 포맷으로 분리한 것은 실질적인 성능 이점을 가져온다. GLB는 Three.js가 추가 변환 없이 직접 소비하고, Parquet는 DuckDB-WASM이 컬럼 단위로 부분 읽기할 수 있어 전송량과 처리 속도 모두에서 유리하다.
+
+**GUID 연결의 단순함.** 형상과 속성을 연결하는 메커니즘이 Revit UniqueId라는 이미 존재하는 식별자 하나에 의존한다. 별도의 매핑 테이블이나 인덱스 서버 없이, 추출 시점에 양쪽 파일에 동일한 값을 기록하는 것만으로 런타임 결합이 성립한다.
+
+**클라우드 비의존.** 추출 과정이 Revit 로컬 플러그인으로 완결되고, 속성 조회도 브라우저 내 DuckDB-WASM으로 처리되므로 외부 클라우드 서비스나 API 호출 비용이 발생하지 않는다. 네트워크가 불안정한 환경에서도 캐시된 데이터로 동작할 수 있다.
+
+### 개선 필요
+
+- **전체 로딩 방식**: GLB를 전체 로드해 대형 모델에서 초기 로딩이 느리다. 공간 분할 + 뷰포트 우선의 점진적 로딩이 필요하다.
+- **WebGPU 미활성**: 감지/추상화는 있으나 실제 WebGPU 렌더링 경로는 미구현이다. 백엔드 전환으로 대규모 렌더링 최적화를 적용해야 한다.
+- **서버 계층 부재**: L4(PostgreSQL)는 인터페이스만 있고 미연결 상태다. 교차 모델 조회와 이력 추적을 위해 API/저장소 연동이 필요하다.
+- **흰색 렌더링 이슈**: 일부 재질이 흰색으로 보이고 얇은 요소의 뒷면 누락이 발생한다. Exporter의 색상 추출(Tint/Shade 포함)과 Viewer의 `DoubleSided`/`side` 처리 일관성을 함께 검증해야 한다.
+
+---
+
+## 5. Demo
+
+### Image
+
+<img width="3840" height="2160" alt="Image" src="https://github.com/user-attachments/assets/20997fc9-a31b-4424-8c5f-3856f280617f" />
+
+<img width="3840" height="2160" alt="Image" src="https://github.com/user-attachments/assets/e7356bb6-b83e-40a4-8002-e93bc50740f0" />
+
+<img width="3840" height="2160" alt="Image" src="https://github.com/user-attachments/assets/5c45a91f-86f3-4296-b94d-dd619f974369" />
+
+### Video
+
+https://github.com/user-attachments/assets/ad315873-fe85-4c3a-80e3-8fc57bb970f7
+
+---
+
+## 6. 실행 방법
+
+### 1) Revit 플러그인 빌드 및 설치
+
+1. Visual Studio 2022에서 `revit-plugin/DTExtractor/DTExtractor.csproj`를 연다.
+2. 빌드 구성을 선택한다.
+    - `Debug-R2024` (개발용)
+    - `Release-R2024` (배포용)
+3. `Build Solution`을 실행한다. 빌드 후 아래 경로에 자동 배포된다.
+    - `C:\Users\[사용자명]\AppData\Roaming\Autodesk\Revit\Addins\2024\`
+4. Revit 2024를 실행해 리본 메뉴의 `DT Engine` 탭과 `Export to DT Engine` 버튼을 확인한다.
+
+### 2) Revit 모델 내보내기
+
+1. Revit에서 모델을 열고 `Default 3D View`를 생성한다.
+2. `DT Engine` -> `Export to DT Engine`을 클릭한다.
+3. 출력 파일명을 `model.glb`로 지정하고 아래 경로에 저장한다.
+    - `[프로젝트폴더]/web-viewer/public/models/model.glb`
+4. 내보내기 완료 후 아래 두 파일 생성 여부를 확인한다.
+    - `model.glb`
+    - `model.parquet`
+
+### 3) 웹 뷰어 실행
+
+생성한 두 파일(`.glb`, `.parquet`)을 `web-viewer/public/models/`에 넣고,
+`web-viewer/src/constants.ts`의 `MODEL_BASE_NAME`을 실제 파일명(확장자 제외)과 일치하게 수정한다.
 
 ```bash
 cd web-viewer
-npm install
+yarn install
+yarn dev
 ```
-
-### 4.2. 모델 파일 배치
-
-Revit에서 내보낼 때 파일명을 **`model.glb`**로 저장하면 웹 뷰어가 자동으로 `model.glb` / `model.parquet`를 로드합니다.
-
-```
-web-viewer/public/models/
-├── model.glb
-└── model.parquet
-```
-
-### 4.3. 개발 서버 시작
-
-```bash
-npm run dev
-```
-
-브라우저가 자동으로 열리며 `http://localhost:3000`에 접속됩니다.
-
----
-
-## 5. 주요 기능
-
-### 5.1. 카메라 조작
-
-| 입력                   | 동작       |
-| ---------------------- | ---------- |
-| 마우스 좌클릭 + 드래그 | 회전       |
-| 마우스 우클릭 + 드래그 | 이동       |
-| 마우스 휠              | 줌 인/아웃 |
-
-### 5.2. 렌더링 모드 (좌측 사이드바)
-
-- **Material**: PBR 재질, 광원 및 그림자
-- **Wireframe**: 메쉬 삼각형 구조 표시
-- **X-Ray**: 반투명 렌더링으로 내부 구조 투시
-
-### 5.3. Click-to-Data (객체 정보 조회)
-
-1. 3D 모델에서 **객체 좌클릭**
-2. 선택된 객체가 파란색으로 하이라이트
-3. **우측 패널에 Revit 파라미터 즉시 표시**:
-    - 기본 정보 (GUID, Family, Type, Level)
-    - Instance/Type Parameters
-    - 수량 정보 (Volume, Area)
-
-**4단 캐시 시스템**:
-
-- L1 (0ms): GLB 내장 정보
-- L2 (<5ms): IndexedDB 캐시
-- L3 (<100ms): DuckDB-WASM Parquet 쿼리
-- L4: PostgreSQL API (미구현)
-
-### 5.4. 뷰 제어
-
-- **Reset View**: 카메라 초기 위치로 리셋
-- **Fit All**: 모델 전체 화면 맞춤
-- **Show Grid**: 바닥 그리드 표시
-- **Show Axes**: XYZ 축 표시
-
-### 5.5. 조명 제어
-
-- **Ambient Intensity**: 환경광 강도 (0.0~2.0)
-- **Directional Intensity**: 직사광 강도 (0.0~3.0)
-- **Enable Shadows**: 실시간 그림자 렌더링
-
-### 5.6. 성능 모니터링
-
-화면 상단 Stats 패널에 실시간 정보 표시:
-
-```
-Backend: WEBGL2 | Triangles: 1,234,567 | Draw Calls: 42 | Cache: 128
-```
-
----
-
-## 6. 문제 해결
-
-### 6.1. Revit 플러그인 미표시
-
-**해결**:
-
-1. Revit 재시작
-2. Addins 폴더 확인:
-    ```
-    C:\Users\[사용자명]\AppData\Roaming\Autodesk\Revit\Addins\2024\
-    ```
-3. 폴더 내 `DTExtractor.dll`, `DTExtractor.addin` 및 의존 DLL 존재 확인
-4. Visual Studio에서 `Debug-R2024` 구성으로 재빌드
-
-### 6.2. 내보내기 오류
-
-**해결**:
-
-1. 3D 뷰가 존재하는지 확인
-2. 출력 경로에 쓰기 권한 확인
-3. 대형 모델(10GB+)의 경우 불필요한 요소 숨기기
-
-### 6.3. 웹 뷰어 모델 로드 실패
-
-**해결**:
-
-1. 파일 경로 확인:
-    ```bash
-    ls web-viewer/public/models/
-    # model.glb 및 model.parquet 존재 확인
-    ```
-2. 파일명이 `model.glb`, `model.parquet`인지 확인
-3. F12 → Console에서 에러 로그 확인
-
-### 6.4. Click-to-Data 작동 안 함
-
-**해결**:
-
-1. F12 Console에서 "Clicked element" 로그 확인
-2. GLB와 Parquet 파일이 동일한 Revit 모델에서 동시에 내보낸 파일인지 확인
-3. 브라우저 Network 탭에서 Parquet 파일 로드 확인
-
-### 6.5. 렌더링 성능 저하
-
-**해결**:
-
-1. Stats 패널에서 삼각형 수 확인 (100만 개 이상 시 LOD 최적화 필요)
-2. 그림자 비활성화 (`Enable Shadows` 체크 해제)
-3. X-Ray 모드 대신 Material 모드 사용
-
----
-
-## 7. 추가 정보
-
-### 프로덕션 배포
-
-```bash
-cd web-viewer
-npm run build
-```
-
-빌드 결과물(`web-viewer/dist/`)을 웹 서버(Apache, Nginx, IIS)에 배포 가능
-
-### 브라우저 호환성
-
-| 브라우저     | WebGPU | WebGL 2.0 | 권장     |
-| ------------ | ------ | --------- | -------- |
-| Chrome 113+  | ✓      | ✓         | ✓ 최우선 |
-| Edge 113+    | ✓      | ✓         | ✓ 권장   |
-| Firefox 141+ | ✓      | ✓         | ✓ 권장   |
-| Safari 18+   | 제한적 | ✓         | △        |
-
-WebGPU 미지원 시 자동으로 WebGL 2.0으로 폴백됩니다.
