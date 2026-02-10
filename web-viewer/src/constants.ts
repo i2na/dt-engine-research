@@ -1,0 +1,36 @@
+export const MODEL_BASE_NAME = "racbasic";
+
+export const CAMERA_ANIM_DURATION_MS = 1000;
+
+export const CAMERA_PRESETS: Record<
+    string,
+    {
+        FIELD_OF_VIEW: number;
+        WORLD_UP_VECTOR: [number, number, number];
+        EYE: [number, number, number];
+        TARGET: [number, number, number];
+        UP: [number, number, number];
+    }
+> = {
+    factorial: {
+        FIELD_OF_VIEW: 60,
+        WORLD_UP_VECTOR: [0, 1, 0],
+        EYE: [330.20007810918423, 338.71522416737156, 204.58877037231264],
+        TARGET: [96.52412620602006, 47.474579629693984, -0.807507648874436],
+        UP: [0.17867592045721084, -0.14419604761624216, 0.9732843445266258],
+    },
+    racbasic: {
+        FIELD_OF_VIEW: 60,
+        WORLD_UP_VECTOR: [0, 1, 0],
+        EYE: [-85.48016054911778, -63.894560978664444, 51.55182041054672],
+        TARGET: [5.772315641639986, -14.735282187763563, 8.592047184966214],
+        UP: [0.6268349112568016, 0.34317158056745645, 0.6995078700919036],
+    },
+    snowdon: {
+        FIELD_OF_VIEW: 60,
+        WORLD_UP_VECTOR: [0, 1, 0],
+        EYE: [-74.64422338962176, -168.9562339837275, 120.6225686654259],
+        TARGET: [-16.256724025598295, 6.430182180112097, 8.012851207938272],
+        UP: [0.06227930773881089, 0.05649073775064691, 0.9964587720402499],
+    },
+};

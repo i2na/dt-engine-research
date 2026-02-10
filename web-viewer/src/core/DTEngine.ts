@@ -54,9 +54,14 @@ export class DTEngine {
     private _cameraAnimEndPos = new THREE.Vector3();
     private _cameraAnimStartTarget = new THREE.Vector3();
     private _cameraAnimEndTarget = new THREE.Vector3();
+    private _cameraAnimStartUp = new THREE.Vector3(0, 1, 0);
+    private _cameraAnimEndUp = new THREE.Vector3(0, 1, 0);
+    private _cameraAnimLerpedUp = new THREE.Vector3(0, 1, 0);
+    private _cameraAnimStartFov = 60;
+    private _cameraAnimEndFov = 60;
     private _cameraAnimStartTime = 0;
     private _cameraAnimDuration = 0;
-    private static readonly CAMERA_ANIM_DURATION_MS = 650;
+    private _cameraAnimDurationMs = 650;
 
     public onElementSelected?: (metadata: ElementMetadata | null, latency: number) => void;
     public onStatsUpdate?: (stats: any) => void;
@@ -164,13 +169,34 @@ export class DTEngine {
         if (!this.backend) return;
 
         if (this._cameraAnimStartTime > 0) {
-            const t = Math.min((performance.now() - this._cameraAnimStartTime) / this._cameraAnimDuration, 1);
+            const t = Math.min(
+                (performance.now() - this._cameraAnimStartTime) / this._cameraAnimDuration,
+                1
+            );
             const eased = 1 - Math.pow(1 - t, 3);
-            this.activeCamera.position.lerpVectors(this._cameraAnimStartPos, this._cameraAnimEndPos, eased);
+            this.activeCamera.position.lerpVectors(
+                this._cameraAnimStartPos,
+                this._cameraAnimEndPos,
+                eased
+            );
             if (this.controls) {
-                this.controls.target.lerpVectors(this._cameraAnimStartTarget, this._cameraAnimEndTarget, eased);
+                this.controls.target.lerpVectors(
+                    this._cameraAnimStartTarget,
+                    this._cameraAnimEndTarget,
+                    eased
+                );
+                this._cameraAnimLerpedUp.lerpVectors(
+                    this._cameraAnimStartUp,
+                    this._cameraAnimEndUp,
+                    eased
+                );
+                this.activeCamera.up.copy(this._cameraAnimLerpedUp).normalize();
                 this.activeCamera.lookAt(this.controls.target);
             }
+            this.perspCamera.fov =
+                this._cameraAnimStartFov +
+                (this._cameraAnimEndFov - this._cameraAnimStartFov) * eased;
+            this.perspCamera.updateProjectionMatrix();
             if (t >= 1) {
                 this._cameraAnimStartTime = 0;
             }
@@ -411,8 +437,54 @@ export class DTEngine {
         this._cameraAnimEndPos.set(50, 50, 50);
         this._cameraAnimStartTarget.copy(this.controls.target);
         this._cameraAnimEndTarget.set(0, 0, 0);
+        this._cameraAnimStartUp.copy(this.activeCamera.up);
+        this._cameraAnimEndUp.set(0, 1, 0);
+        this._cameraAnimStartFov = this.perspCamera.fov;
+        this._cameraAnimEndFov = 60;
         this._cameraAnimStartTime = performance.now();
-        this._cameraAnimDuration = DTEngine.CAMERA_ANIM_DURATION_MS;
+        this._cameraAnimDuration = this._cameraAnimDurationMs;
+    }
+
+    setCameraAnimDurationMs(ms: number): void {
+        this._cameraAnimDurationMs = ms;
+    }
+
+    animateCameraTo(
+        eye: THREE.Vector3,
+        target: THREE.Vector3,
+        up: THREE.Vector3,
+        fov: number
+    ): void {
+        if (!this.controls) return;
+        this._cameraAnimStartPos.copy(this.activeCamera.position);
+        this._cameraAnimEndPos.copy(eye);
+        this._cameraAnimStartTarget.copy(this.controls.target);
+        this._cameraAnimEndTarget.copy(target);
+        this._cameraAnimStartUp.copy(this.activeCamera.up);
+        this._cameraAnimEndUp.copy(up);
+        this._cameraAnimStartFov = this.perspCamera.fov;
+        this._cameraAnimEndFov = fov;
+        this._cameraAnimStartTime = performance.now();
+        this._cameraAnimDuration = this._cameraAnimDurationMs;
+    }
+
+    getCameraState(): {
+        FIELD_OF_VIEW: number;
+        WORLD_UP_VECTOR: [number, number, number];
+        EYE: [number, number, number];
+        TARGET: [number, number, number];
+        UP: [number, number, number];
+    } {
+        const pos = this.activeCamera.position;
+        const tgt = this.controls?.target ?? new THREE.Vector3(0, 0, 0);
+        const u = this.activeCamera.up;
+        return {
+            FIELD_OF_VIEW: this.perspCamera.fov,
+            WORLD_UP_VECTOR: [0, 1, 0],
+            EYE: [pos.x, pos.y, pos.z],
+            TARGET: [tgt.x, tgt.y, tgt.z],
+            UP: [u.x, u.y, u.z],
+        };
     }
 
     animateFitToView(): void {
@@ -434,8 +506,12 @@ export class DTEngine {
         this._cameraAnimEndPos.copy(endPos);
         this._cameraAnimStartTarget.copy(this.controls.target);
         this._cameraAnimEndTarget.copy(center);
+        this._cameraAnimStartUp.copy(this.activeCamera.up);
+        this._cameraAnimEndUp.set(0, 1, 0);
+        this._cameraAnimStartFov = this.perspCamera.fov;
+        this._cameraAnimEndFov = this.perspCamera.fov;
         this._cameraAnimStartTime = performance.now();
-        this._cameraAnimDuration = DTEngine.CAMERA_ANIM_DURATION_MS;
+        this._cameraAnimDuration = this._cameraAnimDurationMs;
 
         if (this.gridHelper) {
             const wasVisible = this.gridHelper.visible;

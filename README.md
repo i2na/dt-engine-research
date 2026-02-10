@@ -1,7 +1,5 @@
 # DT Engine
 
-<img width="2553" height="1297" alt="image" src="https://github.com/user-attachments/assets/2a8f6f1e-a00d-4800-b73d-55a8ddd22c53" />
-
 ## 목차
 
 1. [시스템 요구사항](#1-시스템-요구사항)
@@ -10,6 +8,8 @@
 4. [웹 뷰어 실행](#4-웹-뷰어-실행)
 5. [주요 기능](#5-주요-기능)
 6. [문제 해결](#6-문제-해결)
+
+<img width="3840" height="2160" alt="Image" src="https://github.com/user-attachments/assets/20997fc9-a31b-4424-8c5f-3856f280617f" />
 
 ---
 

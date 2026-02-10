@@ -1,5 +1,7 @@
+import * as THREE from "three";
 import { DTEngine } from "./core/DTEngine";
 import { RightSidebar } from "./ui/RightSidebar";
+import { CAMERA_ANIM_DURATION_MS, CAMERA_PRESETS, MODEL_BASE_NAME } from "./constants";
 
 async function main() {
     const canvas = document.getElementById("canvas") as HTMLCanvasElement;
@@ -7,6 +9,7 @@ async function main() {
 
     try {
         await engine.initialize(canvas);
+        engine.setCameraAnimDurationMs(CAMERA_ANIM_DURATION_MS);
 
         const rightSidebar = new RightSidebar("metadata-panel");
         const loadingEl = document.getElementById("loading")!;
@@ -31,19 +34,45 @@ async function main() {
                 `Cache: ${stats.cacheSize}`;
         };
 
-        const glbUrl = new URL("/models/model.glb", window.location.href).href;
-        const parquetUrl = new URL("/models/model.parquet", window.location.href).href;
+        const glbUrl = new URL(`/models/${MODEL_BASE_NAME}.glb`, window.location.href).href;
+        const parquetUrl = new URL(`/models/${MODEL_BASE_NAME}.parquet`, window.location.href).href;
 
         loadingEl.classList.remove("hidden");
 
         try {
             await engine.loadModel(glbUrl, parquetUrl);
             loadingEl.classList.add("hidden");
+
+            const preset = CAMERA_PRESETS[MODEL_BASE_NAME];
+            if (preset) {
+                engine.animateCameraTo(
+                    new THREE.Vector3(preset.EYE[0], preset.EYE[1], preset.EYE[2]),
+                    new THREE.Vector3(preset.TARGET[0], preset.TARGET[1], preset.TARGET[2]),
+                    new THREE.Vector3(preset.UP[0], preset.UP[1], preset.UP[2]),
+                    preset.FIELD_OF_VIEW
+                );
+            }
+
+            (window as any).dtEngine = engine;
+            document.addEventListener("keydown", (e) => {
+                if (e.key === "Enter") {
+                    const s = engine.getCameraState();
+                    console.log(
+                        `{
+    FIELD_OF_VIEW: ${s.FIELD_OF_VIEW},
+    WORLD_UP_VECTOR: [${s.WORLD_UP_VECTOR.join(", ")}],
+    EYE: [${s.EYE.join(", ")}],
+    TARGET: [${s.TARGET.join(", ")}],
+    UP: [${s.UP.join(", ")}],
+},`
+                    );
+                }
+            });
         } catch (error) {
             loadingEl.innerHTML = `
                 <p style="color: #ff6b6b;">모델 로드 실패</p>
                 <p style="font-size: 12px; margin-top: 10px; color: #8b949e;">
-                    model.glb, model.parquet 파일을<br>
+                    ${MODEL_BASE_NAME}.glb, ${MODEL_BASE_NAME}.parquet 파일을<br>
                     <code>/web-viewer/public/models/</code> 폴더에 배치해주세요
                 </p>
             `;
@@ -142,7 +171,19 @@ function bindSidebarControls(engine: DTEngine) {
     bindToggle("show-grid", (v) => engine.setGridVisible(v));
     bindToggle("show-axes", (v) => engine.setAxesVisible(v));
 
-    document.getElementById("reset-camera")!.addEventListener("click", () => location.reload());
+    document.getElementById("reset-camera")!.addEventListener("click", () => {
+        const preset = CAMERA_PRESETS[MODEL_BASE_NAME];
+        if (preset) {
+            engine.animateCameraTo(
+                new THREE.Vector3(preset.EYE[0], preset.EYE[1], preset.EYE[2]),
+                new THREE.Vector3(preset.TARGET[0], preset.TARGET[1], preset.TARGET[2]),
+                new THREE.Vector3(preset.UP[0], preset.UP[1], preset.UP[2]),
+                preset.FIELD_OF_VIEW
+            );
+        } else {
+            engine.animateResetView();
+        }
+    });
     document.getElementById("fit-all")!.addEventListener("click", () => engine.animateFitToView());
 }
 
