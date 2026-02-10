@@ -371,3 +371,33 @@ Windows 탐색기에서 `%AppData%\Autodesk\Revit\Addins\2024\` 경로를 직접
 | GLB 빈 파일                    | 100% polymesh 실패            | `.export-log.txt` 확인, Revit 재시작 후 재시도 |
 | Flat gray 렌더링               | 웹 뷰어가 PBR 미지원          | Three.js MeshStandardMaterial 사용 확인        |
 | 선택 미동작                    | 노드 이름 매핑 오류           | GLB 파일의 노드 이름이 UniqueId인지 확인       |
+
+---
+
+## 흰색 렌더링 수정 (White Rendering)
+
+**증상:** 웹 뷰어에서 재질이 흰색으로 보이거나, 얇은 BIM 요소(벽·바닥·천장) 뒷면이 잘려 보이는 현상.
+
+**근본 원인 (두 가지):**
+
+1. **재질 스키마 커버리지 부족 (Revit Exporter)**  
+   `DTGeometryExporter.cs`의 `GetAppearanceColor()`가 Revit 재질 스키마 27종 이상 중 13종만 인식. 유리(glass), 목재(wood), 돌(stone), 소프트우드(softwood), 거울(mirror), 물(water) 등 미인식 스키마는 `null`을 반환하고, 내보내기가 `materialNode.Color`로 폴백. 해당 값이 많은 재질에서 순백(255,255,255)이라, 렌더링 에셋이 아닌 기본 셰이딩 색만 쓰여 흰색으로 보임.
+
+2. **FrontSide 강제 (Web viewer)**  
+   `GLBLoader.ts`의 `setupScene()`에서 모든 `MeshStandardMaterial`에 `mat.side = THREE.FrontSide`를 강제 적용. glTF 내보내기의 `DoubleSided = true`를 덮어써, 얇은 BIM 요소의 뒷면이 컬링되어 보이지 않는 현상 발생.
+
+**수정:**
+
+**DTGeometryExporter.cs**
+
+- `ColorPropertyMap`: 13종 → 27종으로 확장. 추가 스키마: PrismWoodSchema, PrismGlazingSchema, PrismStoneSchema, PrismTransparentSchema, PrismMirrorSchema, PrismSoftwoodSchema, GlazingSchema, WoodSchema, StoneSchema, SolidGlassSchema, MirrorSchema, WaterSchema, SoftwoodSchema.
+- `GetAppearanceColor()` 3단계 폴백으로 재작성:
+    1. 스키마 기반 조회 (기존 로직, 스키마 범위 확대)
+    2. 잘 알려진 폴백 속성명: `generic_diffuse`, `opaque_albedo`, 공통 Tint/Shade_Color
+    3. 속성 스캔: 에셋의 모든 속성 중 `AssetPropertyDoubleArray4d`이고 이름에 "color", "diffuse", "albedo", "tint" 포함된 것 탐색 (순백 값은 제외해 오탐 방지)
+- 중복 제거를 위해 `TryReadColorProperty` 헬퍼 추출.
+
+**GLBLoader.ts**
+
+- `mat.side = THREE.FrontSide` 강제 제거 → glTF의 DoubleSide 설정 유지.
+- `MeshBasicMaterial` 변환 시에도 원본 재질의 `side`를 상속하고, FrontSide 하드코딩 제거.

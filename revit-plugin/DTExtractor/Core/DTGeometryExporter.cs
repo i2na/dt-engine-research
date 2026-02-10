@@ -46,7 +46,19 @@ namespace DTExtractor.Core
 
         private static readonly Dictionary<string, string> ColorPropertyMap = new Dictionary<string, string>
         {
+            // Prism (newer) schemas
             { "PrismGenericSchema", "generic_diffuse" },
+            { "PrismOpaqueSchema", "opaque_albedo" },
+            { "PrismMetalSchema", "adsklib_Metal_F0" },
+            { "PrismLayeredSchema", "adsklib_Layered_Diffuse" },
+            { "PrismMasonryCMUSchema", "masonrycmu_color" },
+            { "PrismWoodSchema", "wood_color" },
+            { "PrismGlazingSchema", "glazing_transmittance_color" },
+            { "PrismStoneSchema", "stone_color" },
+            { "PrismTransparentSchema", "transparent_color" },
+            { "PrismMirrorSchema", "mirror_tintcolor" },
+            { "PrismSoftwoodSchema", "softwood_color" },
+            // Classic schemas
             { "GenericSchema", "generic_diffuse" },
             { "ConcreteSchema", "concrete_color" },
             { "WallPaintSchema", "wallpaint_color" },
@@ -54,12 +66,22 @@ namespace DTExtractor.Core
             { "MetallicPaintSchema", "metallicpaint_base_color" },
             { "CeramicSchema", "ceramic_color" },
             { "MetalSchema", "metal_color" },
-            { "PrismMetalSchema", "adsklib_Metal_F0" },
-            { "PrismOpaqueSchema", "opaque_albedo" },
-            { "PrismLayeredSchema", "adsklib_Layered_Diffuse" },
             { "HardwoodSchema", "hardwood_color" },
-            { "PrismMasonryCMUSchema", "masonrycmu_color" },
             { "MasonryCMUSchema", "masonrycmu_color" },
+            { "GlazingSchema", "glazing_transmittance_color" },
+            { "WoodSchema", "wood_color" },
+            { "StoneSchema", "stone_color" },
+            { "SolidGlassSchema", "solidglass_transmittance_custom_color" },
+            { "MirrorSchema", "mirror_tintcolor" },
+            { "WaterSchema", "water_tint_color" },
+            { "SoftwoodSchema", "softwood_color" },
+        };
+
+        private static readonly string[] FallbackColorPropertyNames = new string[]
+        {
+            "generic_diffuse",
+            "opaque_albedo",
+            "common_Tint/Shade_Color",
         };
 
         public DTGeometryExporter(Document doc, string outputPath)
@@ -459,14 +481,61 @@ namespace DTExtractor.Core
         {
             try
             {
+                // Tier 1: Schema-based lookup
                 var baseSchema = asset.FindByName("BaseSchema") as AssetPropertyString;
-                if (baseSchema == null || string.IsNullOrEmpty(baseSchema.Value))
-                    return null;
+                if (baseSchema != null && !string.IsNullOrEmpty(baseSchema.Value))
+                {
+                    if (ColorPropertyMap.TryGetValue(baseSchema.Value, out var propName))
+                    {
+                        var result = TryReadColorProperty(asset, propName);
+                        if (result != null) return result;
+                    }
+                }
 
-                if (!ColorPropertyMap.TryGetValue(baseSchema.Value, out var propName))
-                    return null;
+                // Tier 2: Try well-known fallback property names
+                foreach (var fallbackName in FallbackColorPropertyNames)
+                {
+                    var result = TryReadColorProperty(asset, fallbackName);
+                    if (result != null) return result;
+                }
 
-                var colorProp = asset.FindByName(propName) as AssetPropertyDoubleArray4d;
+                // Tier 3: Scan all properties for color-type values
+                for (int i = 0; i < asset.Size; i++)
+                {
+                    try
+                    {
+                        var prop = asset[i];
+                        if (prop is AssetPropertyDoubleArray4d colorProp)
+                        {
+                            var name = prop.Name.ToLowerInvariant();
+                            if (name.Contains("color") || name.Contains("diffuse") || name.Contains("albedo") || name.Contains("tint"))
+                            {
+                                var values = colorProp.GetValueAsDoubles();
+                                if (values != null && values.Count >= 3)
+                                {
+                                    float cr = (float)values[0], cg = (float)values[1], cb = (float)values[2];
+                                    if (cr < 0.99f || cg < 0.99f || cb < 0.99f)
+                                        return new float[] { cr, cg, cb };
+                                }
+                            }
+                        }
+                    }
+                    catch { }
+                }
+
+                return null;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static float[] TryReadColorProperty(Asset asset, string propertyName)
+        {
+            try
+            {
+                var colorProp = asset.FindByName(propertyName) as AssetPropertyDoubleArray4d;
                 if (colorProp == null) return null;
 
                 var values = colorProp.GetValueAsDoubles();

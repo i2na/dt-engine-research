@@ -99,7 +99,6 @@ export class DTGLBLoader {
                 let needsDefault = materials.length === 0;
                 materials.forEach((mat) => {
                     if (mat instanceof THREE.MeshStandardMaterial) {
-                        mat.side = THREE.FrontSide;
                         if (hasVertexColors) {
                             mat.vertexColors = true;
                             if (mat.color.getHex() === 0x000000) {
@@ -112,7 +111,7 @@ export class DTGLBLoader {
                         const std = new THREE.MeshStandardMaterial({
                             color: mat.color.clone(),
                             map: mat.map,
-                            side: THREE.FrontSide,
+                            side: mat.side,
                             metalness: 0.12,
                             roughness: 0.65,
                         });
