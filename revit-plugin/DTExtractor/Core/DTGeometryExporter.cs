@@ -386,25 +386,37 @@ namespace DTExtractor.Core
         {
             try
             {
-                // Tier 1: Schema-based lookup
+                string schemaName = null;
                 var baseSchema = asset.FindByName("BaseSchema") as AssetPropertyString;
                 if (baseSchema != null && !string.IsNullOrEmpty(baseSchema.Value))
+                    schemaName = baseSchema.Value;
+
+                float[] schemaColor = null;
+
+                if (schemaName != null && ColorPropertyMap.TryGetValue(schemaName, out var propName))
                 {
-                    if (ColorPropertyMap.TryGetValue(baseSchema.Value, out var propName))
+                    var diffuseProp = asset.FindByName(propName);
+                    bool hasConnectedTexture = diffuseProp != null &&
+                                               diffuseProp.NumberOfConnectedProperties > 0;
+
+                    if (hasConnectedTexture)
                     {
-                        var result = TryReadColorProperty(asset, propName);
-                        if (result != null) return result;
+                        var tint = TryGetTintColor(asset);
+                        if (tint != null) return tint;
                     }
+
+                    schemaColor = TryReadColorProperty(asset, propName);
+                    if (schemaColor != null && !IsNearWhite(schemaColor))
+                        return schemaColor;
                 }
 
-                // Tier 2: Try well-known fallback property names
                 foreach (var fallbackName in FallbackColorPropertyNames)
                 {
                     var result = TryReadColorProperty(asset, fallbackName);
-                    if (result != null) return result;
+                    if (result != null && !IsNearWhite(result))
+                        return result;
                 }
 
-                // Tier 3: Scan all properties for color-type values
                 for (int i = 0; i < asset.Size; i++)
                 {
                     try
@@ -413,13 +425,14 @@ namespace DTExtractor.Core
                         if (prop is AssetPropertyDoubleArray4d colorProp)
                         {
                             var name = prop.Name.ToLowerInvariant();
-                            if (name.Contains("color") || name.Contains("diffuse") || name.Contains("albedo") || name.Contains("tint"))
+                            if (name.Contains("color") || name.Contains("diffuse") ||
+                                name.Contains("albedo") || name.Contains("tint"))
                             {
                                 var values = colorProp.GetValueAsDoubles();
                                 if (values != null && values.Count >= 3)
                                 {
                                     float cr = (float)values[0], cg = (float)values[1], cb = (float)values[2];
-                                    if (cr < 0.99f || cg < 0.99f || cb < 0.99f)
+                                    if (!IsNearWhite(cr, cg, cb))
                                         return new float[] { cr, cg, cb };
                                 }
                             }
@@ -428,7 +441,33 @@ namespace DTExtractor.Core
                     catch { }
                 }
 
+                return schemaColor;
+            }
+            catch
+            {
                 return null;
+            }
+        }
+
+        private static float[] TryGetTintColor(Asset asset)
+        {
+            try
+            {
+                var tintToggle = asset.FindByName("common_Tint_toggle") as AssetPropertyBoolean;
+                if (tintToggle != null && !tintToggle.Value)
+                    return null;
+
+                var tintProp = asset.FindByName("common_Tint/Shade_Color") as AssetPropertyDoubleArray4d;
+                if (tintProp == null) return null;
+
+                var values = tintProp.GetValueAsDoubles();
+                if (values == null || values.Count < 3) return null;
+
+                float r = (float)values[0], g = (float)values[1], b = (float)values[2];
+                if (IsNearWhite(r, g, b))
+                    return null;
+
+                return new float[] { r, g, b };
             }
             catch
             {
@@ -453,6 +492,9 @@ namespace DTExtractor.Core
                 return null;
             }
         }
+
+        private static bool IsNearWhite(float[] c) => c[0] > 0.95f && c[1] > 0.95f && c[2] > 0.95f;
+        private static bool IsNearWhite(float r, float g, float b) => r > 0.95f && g > 0.95f && b > 0.95f;
 
         #endregion
 

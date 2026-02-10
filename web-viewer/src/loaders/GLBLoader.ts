@@ -80,6 +80,11 @@ export class DTGLBLoader {
 
         scene.traverse((node) => {
             if (node instanceof THREE.Mesh) {
+                const geometry = node.geometry as THREE.BufferGeometry;
+                if (geometry && !geometry.attributes.normal) {
+                    geometry.computeVertexNormals();
+                }
+
                 const colorAttr = (node.geometry as any)?.attributes?.color as THREE.BufferAttribute | undefined;
                 const hasVertexColors = !!colorAttr;
                 if (colorAttr && !(colorAttr as any)._srgbToLinear) {
