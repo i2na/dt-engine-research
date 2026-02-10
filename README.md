@@ -13,7 +13,7 @@ Revit 모델(.rvt)에서 3D 형상과 BIM 속성을 각각 최적 포맷으로 �
 5. [Demo](#5-demo)
 6. [실행 방법](#6-실행-방법)
 
-<img width="3840" height="2160" alt="Image" src="https://github.com/user-attachments/assets/20997fc9-a31b-4424-8c5f-3856f280617f" />
+<img width="1920" height="1080" alt="racbasic" src="https://github.com/user-attachments/assets/363ff465-9f49-4a06-a6b5-246a4e974cf3" />
 
 ---
 
@@ -147,15 +147,13 @@ DuckDB-WASM은 이 엔진에서 속성 질의 엔진으로 기능한다. 웹 뷰
 
 ### Image
 
-<img width="3840" height="2160" alt="Image" src="https://github.com/user-attachments/assets/20997fc9-a31b-4424-8c5f-3856f280617f" />
-
-<img width="3840" height="2160" alt="Image" src="https://github.com/user-attachments/assets/e7356bb6-b83e-40a4-8002-e93bc50740f0" />
-
-<img width="3840" height="2160" alt="Image" src="https://github.com/user-attachments/assets/5c45a91f-86f3-4296-b94d-dd619f974369" />
+<img width="1920" height="1080" alt="racbasic" src="https://github.com/user-attachments/assets/363ff465-9f49-4a06-a6b5-246a4e974cf3" />
+<img width="1920" height="1080" alt="factorial" src="https://github.com/user-attachments/assets/89ae1250-beb6-45b1-983a-437a5816d682" />
+<img width="1920" height="1080" alt="snowdon" src="https://github.com/user-attachments/assets/011dd691-94a1-4e62-b007-9103d1285980" />
 
 ### Video
 
-https://github.com/user-attachments/assets/ad315873-fe85-4c3a-80e3-8fc57bb970f7
+https://github.com/user-attachments/assets/d41bad99-5f4e-4e7f-a4a7-0d7865a067b6
 
 ---
 
