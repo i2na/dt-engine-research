@@ -2,6 +2,8 @@
 
 **Autodesk Tandem/LMV 생태계 종속 제거를 위한 프로덕션급 엔진 설계**
 
+> **소스 코드**: https://github.com/i2na/dt-engine-research
+
 ---
 
 ## 목차
