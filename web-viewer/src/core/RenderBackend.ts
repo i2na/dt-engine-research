@@ -55,7 +55,7 @@ export class WebGL2Backend implements IRenderBackend {
 
         this._renderer.shadowMap.enabled = true;
         this._renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-        this._renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        this._renderer.toneMapping = THREE.NoToneMapping;
         this._renderer.toneMappingExposure = 1.0;
         this._renderer.outputColorSpace = THREE.SRGBColorSpace;
         this._renderer.setPixelRatio(Math.min(2.0, window.devicePixelRatio));

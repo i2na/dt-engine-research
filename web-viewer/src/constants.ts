@@ -1,4 +1,4 @@
-export const MODEL_BASE_NAME = "racbasic";
+export const MODEL_BASE_NAME = "snowdon";
 
 export const CAMERA_ANIM_DURATION_MS = 1000;
 

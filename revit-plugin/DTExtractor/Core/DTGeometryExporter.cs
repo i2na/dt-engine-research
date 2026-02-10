@@ -441,7 +441,7 @@ namespace DTExtractor.Core
                     catch { }
                 }
 
-                return schemaColor;
+                return null;
             }
             catch
             {

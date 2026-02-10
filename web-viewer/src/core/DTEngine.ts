@@ -79,15 +79,15 @@ export class DTEngine {
 
         this.activeCamera = this.perspCamera;
 
-        this.ambientLight = new THREE.AmbientLight(0xffffff, 0.3);
+        this.ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
         this.scene.add(this.ambientLight);
 
-        this.fillLight = new THREE.DirectionalLight(0xffffff, 0.9);
+        this.fillLight = new THREE.DirectionalLight(0xffffff, 0.4);
         this.fillLight.position.set(-30, 40, -20);
         this.fillLight.castShadow = false;
         this.scene.add(this.fillLight);
 
-        this.directionalLight = new THREE.DirectionalLight(0xffffff, 1.7);
+        this.directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
         this.directionalLight.castShadow = true;
         this.directionalLight.shadow.mapSize.width = 1024;
         this.directionalLight.shadow.mapSize.height = 1024;
@@ -135,8 +135,8 @@ export class DTEngine {
         this._setupPostProcessing(w, h);
         this._setupHelpers();
         this._updateOutlineSelection(null);
-        this.setExposure(0.9);
-        this.setEnvironmentIntensity(0.7);
+        this.setExposure(1.0);
+        this.setEnvironmentIntensity(0.25);
         this.setShadowsEnabled(true);
         this.setSSAOEnabled(false);
 
@@ -618,7 +618,7 @@ export class DTEngine {
     private _setupPostProcessing(width: number, height: number): void {
         const renderer = this.backend!.renderer;
         this.composer = new EffectComposer(renderer);
-        this.composer.setPixelRatio(Math.min(1.25, window.devicePixelRatio));
+        this.composer.setPixelRatio(Math.min(2.0, window.devicePixelRatio));
 
         this.renderPass = new RenderPass(this.scene, this.activeCamera);
         this.composer.addPass(this.renderPass);
