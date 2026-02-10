@@ -25,20 +25,35 @@
                 --radius-lg: 12px;
             }
 
-            * { margin: 0; padding: 0; box-sizing: border-box; }
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
 
             body {
-                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+                font-family:
+                    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu,
+                    Cantarell, sans-serif;
                 overflow: hidden;
                 background: var(--bg-primary);
                 color: var(--text-primary);
                 font-size: 13px;
             }
 
-            #app { position: relative; width: 100vw; height: 100vh; }
+            #app {
+                position: relative;
+                width: 100vw;
+                height: 100vh;
+            }
 
-            #canvas-container { position: absolute; inset: 0; }
-            #canvas-container canvas { display: block; }
+            #canvas-container {
+                position: absolute;
+                inset: 0;
+            }
+            #canvas-container canvas {
+                display: block;
+            }
 
             /* Glassmorphism Sidebars */
             .sidebar {
@@ -58,8 +73,13 @@
                 box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
             }
 
-            #left-sidebar { left: 12px; }
-            #right-sidebar { right: 12px; width: 480px; }
+            #left-sidebar {
+                left: 12px;
+            }
+            #right-sidebar {
+                right: 12px;
+                width: 480px;
+            }
 
             .sidebar-header {
                 display: flex;
@@ -71,16 +91,29 @@
             }
 
             .app-logo {
-                width: 30px; height: 30px;
+                width: 35px;
+                height: 35px;
                 background: linear-gradient(135deg, #58a6ff, #3b82f6);
                 border-radius: var(--radius-md);
-                display: flex; align-items: center; justify-content: center;
-                font-weight: 700; font-size: 12px; color: #fff;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-weight: 700;
+                font-size: 12px;
+                color: #fff;
                 flex-shrink: 0;
             }
 
-            .app-name { font-size: 14px; font-weight: 600; color: var(--text-primary); }
-            .app-version { font-size: 10px; color: var(--text-secondary); }
+            .app-name {
+                font-size: 16px;
+                font-weight: 600;
+                color: var(--text-primary);
+            }
+            .app-version {
+                font-size: 12px;
+                margin-top: 4px;
+                color: var(--text-secondary);
+            }
 
             .sidebar-scroll {
                 flex: 1;
@@ -89,7 +122,9 @@
             }
 
             /* Collapsible Sections */
-            .panel-section { border-bottom: 1px solid var(--border); }
+            .panel-section {
+                border-bottom: 1px solid var(--border);
+            }
 
             .section-header {
                 display: flex;
@@ -101,10 +136,13 @@
                 transition: background 0.15s;
             }
 
-            .section-header:hover { background: var(--bg-hover); }
+            .section-header:hover {
+                background: var(--bg-hover);
+            }
 
             .section-header svg {
-                width: 15px; height: 15px;
+                width: 15px;
+                height: 15px;
                 color: var(--text-secondary);
                 flex-shrink: 0;
             }
@@ -119,12 +157,15 @@
             }
 
             .chevron {
-                width: 14px; height: 14px;
+                width: 14px;
+                height: 14px;
                 color: var(--text-muted);
                 transition: transform 0.2s ease;
             }
 
-            .panel-section.collapsed .chevron { transform: rotate(-90deg); }
+            .panel-section.collapsed .chevron {
+                transform: rotate(-90deg);
+            }
 
             .section-content {
                 display: grid;
@@ -146,7 +187,9 @@
             }
 
             /* Control Rows */
-            .control-row { margin-bottom: 15px; }
+            .control-row {
+                margin-bottom: 15px;
+            }
 
             .control-label {
                 display: flex;
@@ -182,11 +225,14 @@
 
             input[type="range"]::-webkit-slider-thumb {
                 -webkit-appearance: none;
-                width: 14px; height: 14px;
+                width: 14px;
+                height: 14px;
                 background: var(--accent);
                 border-radius: 50%;
                 cursor: pointer;
-                transition: transform 0.1s, box-shadow 0.1s;
+                transition:
+                    transform 0.1s,
+                    box-shadow 0.1s;
             }
 
             input[type="range"]::-webkit-slider-thumb:hover {
@@ -195,7 +241,8 @@
             }
 
             input[type="range"]::-moz-range-thumb {
-                width: 14px; height: 14px;
+                width: 14px;
+                height: 14px;
                 background: var(--accent);
                 border: none;
                 border-radius: 50%;
@@ -210,18 +257,29 @@
                 margin-bottom: 10px;
             }
 
-            .toggle-row label { font-size: 18px; color: var(--text-secondary); cursor: pointer; }
+            .toggle-row label {
+                font-size: 18px;
+                color: var(--text-secondary);
+                cursor: pointer;
+            }
 
             .toggle {
                 position: relative;
-                width: 36px; height: 20px;
+                width: 36px;
+                height: 20px;
                 flex-shrink: 0;
             }
 
-            .toggle input { opacity: 0; width: 0; height: 0; position: absolute; }
+            .toggle input {
+                opacity: 0;
+                width: 0;
+                height: 0;
+                position: absolute;
+            }
 
             .toggle-track {
-                position: absolute; inset: 0;
+                position: absolute;
+                inset: 0;
                 background: var(--surface-3);
                 border-radius: 10px;
                 cursor: pointer;
@@ -229,13 +287,17 @@
             }
 
             .toggle-track::before {
-                content: '';
+                content: "";
                 position: absolute;
-                width: 14px; height: 14px;
-                left: 3px; top: 3px;
+                width: 14px;
+                height: 14px;
+                left: 3px;
+                top: 3px;
                 background: var(--text-secondary);
                 border-radius: 50%;
-                transition: transform 0.2s, background 0.2s;
+                transition:
+                    transform 0.2s,
+                    background 0.2s;
             }
 
             .toggle input:checked + .toggle-track {
@@ -251,7 +313,8 @@
             input[type="color"] {
                 -webkit-appearance: none;
                 appearance: none;
-                width: 100%; height: 30px;
+                width: 100%;
+                height: 30px;
                 border: 1px solid var(--surface-3);
                 border-radius: var(--radius-sm);
                 cursor: pointer;
@@ -259,8 +322,13 @@
                 padding: 2px;
             }
 
-            input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
-            input[type="color"]::-webkit-color-swatch { border: none; border-radius: 4px; }
+            input[type="color"]::-webkit-color-swatch-wrapper {
+                padding: 0;
+            }
+            input[type="color"]::-webkit-color-swatch {
+                border: none;
+                border-radius: 4px;
+            }
 
             /* Button Group */
             .btn-group {
@@ -284,7 +352,10 @@
                 transition: all 0.15s;
             }
 
-            .btn-group button:hover { color: var(--text-primary); background: var(--surface-2); }
+            .btn-group button:hover {
+                color: var(--text-primary);
+                background: var(--surface-2);
+            }
 
             .btn-group button.active {
                 background: var(--accent-bg);
@@ -322,25 +393,33 @@
             /* Loading Overlay */
             #loading {
                 position: absolute;
-                top: 50%; left: 50%;
+                top: 50%;
+                left: 50%;
                 transform: translate(-50%, -50%);
                 text-align: center;
                 z-index: 20;
                 color: var(--text-primary);
             }
 
-            #loading.hidden { display: none; }
+            #loading.hidden {
+                display: none;
+            }
 
             .spinner {
                 border: 3px solid rgba(88, 166, 255, 0.15);
                 border-top: 3px solid var(--accent);
                 border-radius: 50%;
-                width: 40px; height: 40px;
+                width: 40px;
+                height: 40px;
                 animation: spin 0.8s linear infinite;
                 margin: 0 auto 12px;
             }
 
-            @keyframes spin { to { transform: rotate(360deg); } }
+            @keyframes spin {
+                to {
+                    transform: rotate(360deg);
+                }
+            }
 
             /* Stats Bar */
             #stats {
@@ -348,11 +427,11 @@
                 top: 12px;
                 left: 50%;
                 transform: translateX(-50%);
-                background: rgba(13, 17, 23, 0.75);
-                backdrop-filter: blur(8px);
+                background: var(--bg-surface);
+                backdrop-filter: blur(20px);
                 padding: 6px 14px;
                 border-radius: var(--radius-sm);
-                font-size: 11px;
+                font-size: 17px;
                 color: var(--text-secondary);
                 z-index: 5;
                 letter-spacing: 0.2px;
@@ -366,7 +445,9 @@
                 color: var(--text-primary);
             }
 
-            #metadata-panel { padding: 24px; }
+            #metadata-panel {
+                padding: 24px;
+            }
 
             #metadata-panel.empty {
                 display: flex;
@@ -399,7 +480,9 @@
                 letter-spacing: 0.5px;
             }
 
-            .param-group { margin-bottom: 16px; }
+            .param-group {
+                margin-bottom: 16px;
+            }
 
             .param-group-title {
                 font-size: 16.5px;
@@ -418,8 +501,12 @@
                 font-size: 18px;
             }
 
-            .param-row:last-child { border-bottom: none; }
-            .param-name { color: var(--text-secondary); }
+            .param-row:last-child {
+                border-bottom: none;
+            }
+            .param-name {
+                color: var(--text-secondary);
+            }
 
             .param-value {
                 color: var(--text-primary);
@@ -431,10 +518,19 @@
             }
 
             /* Custom Scrollbar */
-            .sidebar-scroll::-webkit-scrollbar { width: 5px; }
-            .sidebar-scroll::-webkit-scrollbar-track { background: transparent; }
-            .sidebar-scroll::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: 3px; }
-            .sidebar-scroll::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+            .sidebar-scroll::-webkit-scrollbar {
+                width: 5px;
+            }
+            .sidebar-scroll::-webkit-scrollbar-track {
+                background: transparent;
+            }
+            .sidebar-scroll::-webkit-scrollbar-thumb {
+                background: var(--surface-3);
+                border-radius: 3px;
+            }
+            .sidebar-scroll::-webkit-scrollbar-thumb:hover {
+                background: var(--text-muted);
+            }
         </style>
     </head>
     <body>
@@ -457,168 +553,431 @@
                     <!-- Environment -->
                     <div class="panel-section">
                         <div class="section-header">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
+                            <svg
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                            >
+                                <circle cx="12" cy="12" r="10" />
+                                <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20" />
+                                <path d="M2 12h20" />
+                            </svg>
                             <span class="section-title">Environment</span>
-                            <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
+                            <svg
+                                class="chevron"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                            >
+                                <path d="m6 9 6 6 6-6" />
+                            </svg>
                         </div>
-                        <div class="section-content"><div class="section-inner">
-                            <div class="control-row">
-                                <div class="control-label"><label>Background</label></div>
-                                <input type="color" id="bg-color" value="#2f3238">
+                        <div class="section-content">
+                            <div class="section-inner">
+                                <div class="control-row">
+                                    <div class="control-label"><label>Background</label></div>
+                                    <input type="color" id="bg-color" value="#0b1220" />
+                                </div>
+                                <div class="toggle-row">
+                                    <label>Env Background</label>
+                                    <label class="toggle"
+                                        ><input type="checkbox" id="env-toggle" /><span
+                                            class="toggle-track"
+                                        ></span
+                                    ></label>
+                                </div>
+                                <div class="control-row">
+                                    <div class="control-label">
+                                        <label>Env Intensity</label
+                                        ><span class="value" id="env-intensity-val">0.70</span>
+                                    </div>
+                                    <input
+                                        type="range"
+                                        id="env-intensity"
+                                        min="0"
+                                        max="1.5"
+                                        step="0.15"
+                                        value="0.7"
+                                    />
+                                </div>
+                                <div class="control-row">
+                                    <div class="control-label">
+                                        <label>Env Blur</label
+                                        ><span class="value" id="env-blur-val">0.00</span>
+                                    </div>
+                                    <input
+                                        type="range"
+                                        id="env-blur"
+                                        min="0"
+                                        max="0.5"
+                                        step="0.05"
+                                        value="0"
+                                    />
+                                </div>
                             </div>
-                            <div class="toggle-row">
-                                <label>Env Background</label>
-                                <label class="toggle"><input type="checkbox" id="env-toggle"><span class="toggle-track"></span></label>
-                            </div>
-                            <div class="control-row">
-                                <div class="control-label"><label>Env Intensity</label><span class="value" id="env-intensity-val">0.70</span></div>
-                                <input type="range" id="env-intensity" min="0" max="3" step="0.05" value="0.7">
-                            </div>
-                            <div class="control-row">
-                                <div class="control-label"><label>Env Blur</label><span class="value" id="env-blur-val">0.00</span></div>
-                                <input type="range" id="env-blur" min="0" max="1" step="0.02" value="0">
-                            </div>
-                        </div></div>
+                        </div>
                     </div>
 
                     <!-- Lighting -->
                     <div class="panel-section">
                         <div class="section-header">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+                            <svg
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                            >
+                                <circle cx="12" cy="12" r="4" />
+                                <path
+                                    d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"
+                                />
+                            </svg>
                             <span class="section-title">Lighting</span>
-                            <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
+                            <svg
+                                class="chevron"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                            >
+                                <path d="m6 9 6 6 6-6" />
+                            </svg>
                         </div>
-                        <div class="section-content"><div class="section-inner">
-                            <div class="control-row">
-                                <div class="control-label"><label>Exposure</label><span class="value" id="exposure-val">1.20</span></div>
-                                <input type="range" id="exposure" min="0.1" max="3" step="0.05" value="1.2">
+                        <div class="section-content">
+                            <div class="section-inner">
+                                <div class="control-row">
+                                    <div class="control-label">
+                                        <label>Exposure</label
+                                        ><span class="value" id="exposure-val">0.90</span>
+                                    </div>
+                                    <input
+                                        type="range"
+                                        id="exposure"
+                                        min="0.4"
+                                        max="2"
+                                        step="0.2"
+                                        value="0.9"
+                                    />
+                                </div>
+                                <div class="control-row">
+                                    <div class="control-label">
+                                        <label>Ambient</label
+                                        ><span class="value" id="ambient-intensity-val">0.30</span>
+                                    </div>
+                                    <input
+                                        type="range"
+                                        id="ambient-intensity"
+                                        min="0"
+                                        max="1.2"
+                                        step="0.2"
+                                        value="0.3"
+                                    />
+                                </div>
+                                <div class="control-row">
+                                    <div class="control-label">
+                                        <label>Sun Intensity</label
+                                        ><span class="value" id="dir-intensity-val">1.70</span>
+                                    </div>
+                                    <input
+                                        type="range"
+                                        id="dir-intensity"
+                                        min="0.5"
+                                        max="3"
+                                        step="0.25"
+                                        value="1.7"
+                                    />
+                                </div>
+                                <div class="control-row">
+                                    <div class="control-label">
+                                        <label>Sun Azimuth</label
+                                        ><span class="value" id="sun-azimuth-val">45°</span>
+                                    </div>
+                                    <input
+                                        type="range"
+                                        id="sun-azimuth"
+                                        min="0"
+                                        max="360"
+                                        step="15"
+                                        value="45"
+                                    />
+                                </div>
+                                <div class="control-row">
+                                    <div class="control-label">
+                                        <label>Sun Elevation</label
+                                        ><span class="value" id="sun-elevation-val">60°</span>
+                                    </div>
+                                    <input
+                                        type="range"
+                                        id="sun-elevation"
+                                        min="15"
+                                        max="85"
+                                        step="10"
+                                        value="60"
+                                    />
+                                </div>
+                                <div class="toggle-row">
+                                    <label>Shadows</label>
+                                    <label class="toggle"
+                                        ><input type="checkbox" id="shadows-toggle" checked /><span
+                                            class="toggle-track"
+                                        ></span
+                                    ></label>
+                                </div>
                             </div>
-                            <div class="control-row">
-                                <div class="control-label"><label>Ambient</label><span class="value" id="ambient-intensity-val">0.30</span></div>
-                                <input type="range" id="ambient-intensity" min="0" max="2" step="0.05" value="0.3">
-                            </div>
-                            <div class="control-row">
-                                <div class="control-label"><label>Sun Intensity</label><span class="value" id="dir-intensity-val">1.70</span></div>
-                                <input type="range" id="dir-intensity" min="0" max="4" step="0.05" value="1.7">
-                            </div>
-                            <div class="control-row">
-                                <div class="control-label"><label>Sun Azimuth</label><span class="value" id="sun-azimuth-val">45°</span></div>
-                                <input type="range" id="sun-azimuth" min="0" max="360" step="1" value="45">
-                            </div>
-                            <div class="control-row">
-                                <div class="control-label"><label>Sun Elevation</label><span class="value" id="sun-elevation-val">60°</span></div>
-                                <input type="range" id="sun-elevation" min="5" max="90" step="1" value="60">
-                            </div>
-                            <div class="toggle-row">
-                                <label>Shadows</label>
-                                <label class="toggle"><input type="checkbox" id="shadows-toggle" checked><span class="toggle-track"></span></label>
-                            </div>
-                        </div></div>
+                        </div>
                     </div>
 
                     <!-- Effects -->
                     <div class="panel-section">
                         <div class="section-header">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/></svg>
+                            <svg
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                            >
+                                <path
+                                    d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"
+                                />
+                            </svg>
                             <span class="section-title">Effects</span>
-                            <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
+                            <svg
+                                class="chevron"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                            >
+                                <path d="m6 9 6 6 6-6" />
+                            </svg>
                         </div>
-                        <div class="section-content"><div class="section-inner">
-                            <div class="toggle-row">
-                                <label>SSAO</label>
-                                <label class="toggle"><input type="checkbox" id="ssao-toggle"><span class="toggle-track"></span></label>
+                        <div class="section-content">
+                            <div class="section-inner">
+                                <div class="toggle-row">
+                                    <label>SSAO</label>
+                                    <label class="toggle"
+                                        ><input type="checkbox" id="ssao-toggle" /><span
+                                            class="toggle-track"
+                                        ></span
+                                    ></label>
+                                </div>
+                                <div class="control-row">
+                                    <div class="control-label">
+                                        <label>SSAO Radius</label
+                                        ><span class="value" id="ssao-radius-val">6</span>
+                                    </div>
+                                    <input
+                                        type="range"
+                                        id="ssao-radius"
+                                        min="2"
+                                        max="16"
+                                        step="2"
+                                        value="6"
+                                    />
+                                </div>
+                                <div class="toggle-row">
+                                    <label>Bloom</label>
+                                    <label class="toggle"
+                                        ><input type="checkbox" id="bloom-toggle" /><span
+                                            class="toggle-track"
+                                        ></span
+                                    ></label>
+                                </div>
+                                <div class="control-row">
+                                    <div class="control-label">
+                                        <label>Bloom Strength</label
+                                        ><span class="value" id="bloom-strength-val">0.50</span>
+                                    </div>
+                                    <input
+                                        type="range"
+                                        id="bloom-strength"
+                                        min="0.2"
+                                        max="1.2"
+                                        step="0.2"
+                                        value="0.5"
+                                    />
+                                </div>
+                                <div class="control-row">
+                                    <div class="control-label">
+                                        <label>Bloom Threshold</label
+                                        ><span class="value" id="bloom-threshold-val">0.80</span>
+                                    </div>
+                                    <input
+                                        type="range"
+                                        id="bloom-threshold"
+                                        min="0.4"
+                                        max="0.95"
+                                        step="0.1"
+                                        value="0.8"
+                                    />
+                                </div>
+                                <div class="toggle-row">
+                                    <label>Selection Outline</label>
+                                    <label class="toggle"
+                                        ><input type="checkbox" id="outline-toggle" checked /><span
+                                            class="toggle-track"
+                                        ></span
+                                    ></label>
+                                </div>
                             </div>
-                            <div class="control-row">
-                                <div class="control-label"><label>SSAO Radius</label><span class="value" id="ssao-radius-val">10</span></div>
-                                <input type="range" id="ssao-radius" min="1" max="32" step="1" value="10">
-                            </div>
-                            <div class="toggle-row">
-                                <label>Bloom</label>
-                                <label class="toggle"><input type="checkbox" id="bloom-toggle"><span class="toggle-track"></span></label>
-                            </div>
-                            <div class="control-row">
-                                <div class="control-label"><label>Bloom Strength</label><span class="value" id="bloom-strength-val">0.50</span></div>
-                                <input type="range" id="bloom-strength" min="0" max="2" step="0.05" value="0.5">
-                            </div>
-                            <div class="control-row">
-                                <div class="control-label"><label>Bloom Threshold</label><span class="value" id="bloom-threshold-val">0.80</span></div>
-                                <input type="range" id="bloom-threshold" min="0" max="1" step="0.05" value="0.8">
-                            </div>
-                            <div class="toggle-row">
-                                <label>Selection Outline</label>
-                                <label class="toggle"><input type="checkbox" id="outline-toggle" checked><span class="toggle-track"></span></label>
-                            </div>
-                        </div></div>
+                        </div>
                     </div>
 
                     <!-- Camera -->
                     <div class="panel-section">
                         <div class="section-header">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></svg>
+                            <svg
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                            >
+                                <path
+                                    d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"
+                                />
+                                <circle cx="12" cy="13" r="3" />
+                            </svg>
                             <span class="section-title">Camera</span>
-                            <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
+                            <svg
+                                class="chevron"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                            >
+                                <path d="m6 9 6 6 6-6" />
+                            </svg>
                         </div>
-                        <div class="section-content"><div class="section-inner">
-                            <div class="control-row">
-                                <div class="control-label"><label>Field of View</label><span class="value" id="fov-val">60°</span></div>
-                                <input type="range" id="fov" min="20" max="120" step="1" value="60">
-                            </div>
-                            <div class="control-row">
-                                <div class="control-label"><label>Projection</label></div>
-                                <div class="btn-group">
-                                    <button id="proj-perspective" class="active">Perspective</button>
-                                    <button id="proj-ortho">Orthographic</button>
+                        <div class="section-content">
+                            <div class="section-inner">
+                                <div class="control-row">
+                                    <div class="control-label">
+                                        <label>Field of View</label
+                                        ><span class="value" id="fov-val">60°</span>
+                                    </div>
+                                    <input
+                                        type="range"
+                                        id="fov"
+                                        min="30"
+                                        max="90"
+                                        step="10"
+                                        value="60"
+                                    />
+                                </div>
+                                <div class="control-row">
+                                    <div class="control-label"><label>Projection</label></div>
+                                    <div class="btn-group">
+                                        <button id="proj-perspective" class="active">
+                                            Perspective
+                                        </button>
+                                        <button id="proj-ortho">Orthographic</button>
+                                    </div>
                                 </div>
                             </div>
-                        </div></div>
+                        </div>
                     </div>
 
                     <!-- Display -->
                     <div class="panel-section">
                         <div class="section-header">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+                            <svg
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                            >
+                                <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
+                                <circle cx="12" cy="12" r="3" />
+                            </svg>
                             <span class="section-title">Display</span>
-                            <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
+                            <svg
+                                class="chevron"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                            >
+                                <path d="m6 9 6 6 6-6" />
+                            </svg>
                         </div>
-                        <div class="section-content"><div class="section-inner">
-                            <div class="control-row">
-                                <div class="control-label"><label>Render Mode</label></div>
-                                <div class="btn-group">
-                                    <button id="mode-material" class="active">Material</button>
-                                    <button id="mode-wireframe">Wire</button>
-                                    <button id="mode-xray">X-Ray</button>
+                        <div class="section-content">
+                            <div class="section-inner">
+                                <div class="control-row">
+                                    <div class="control-label"><label>Render Mode</label></div>
+                                    <div class="btn-group">
+                                        <button id="mode-material" class="active">Material</button>
+                                        <button id="mode-wireframe">Wire</button>
+                                        <button id="mode-xray">X-Ray</button>
+                                    </div>
+                                </div>
+                                <div class="toggle-row">
+                                    <label>Model Outline</label>
+                                    <label class="toggle"
+                                        ><input type="checkbox" id="model-outline-toggle" /><span
+                                            class="toggle-track"
+                                        ></span
+                                    ></label>
+                                </div>
+                                <div class="toggle-row">
+                                    <label>Grid</label>
+                                    <label class="toggle"
+                                        ><input type="checkbox" id="show-grid" /><span
+                                            class="toggle-track"
+                                        ></span
+                                    ></label>
+                                </div>
+                                <div class="toggle-row">
+                                    <label>Axes</label>
+                                    <label class="toggle"
+                                        ><input type="checkbox" id="show-axes" checked /><span
+                                            class="toggle-track"
+                                        ></span
+                                    ></label>
                                 </div>
                             </div>
-                            <div class="toggle-row">
-                                <label>Model Outline</label>
-                                <label class="toggle"><input type="checkbox" id="model-outline-toggle"><span class="toggle-track"></span></label>
-                            </div>
-                            <div class="toggle-row">
-                                <label>Grid</label>
-                                <label class="toggle"><input type="checkbox" id="show-grid"><span class="toggle-track"></span></label>
-                            </div>
-                            <div class="toggle-row">
-                                <label>Axes</label>
-                                <label class="toggle"><input type="checkbox" id="show-axes" checked><span class="toggle-track"></span></label>
-                            </div>
-                        </div></div>
+                        </div>
                     </div>
                 </div>
 
                 <div class="sidebar-footer">
                     <button id="reset-camera">Reset View</button>
-                    <button id="fit-all">Fit All</button>
+                    <button id="fit-all">Fit to View</button>
                 </div>
             </div>
 
             <!-- Right Sidebar: Metadata -->
             <div id="right-sidebar" class="sidebar">
                 <div class="sidebar-header">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+                    <svg
+                        width="16"
+                        height="16"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                    >
+                        <circle cx="12" cy="12" r="10" />
+                        <path d="M12 16v-4" />
+                        <path d="M12 8h.01" />
+                    </svg>
                     <span class="sidebar-title">Properties</span>
                 </div>
                 <div id="metadata-panel" class="empty">
-                    <p>3D 모델에서 객체를 클릭하면<br>속성이 표시됩니다</p>
+                    <p>3D 모델에서 객체를 클릭하면<br />속성이 표시됩니다</p>
                 </div>
             </div>
 

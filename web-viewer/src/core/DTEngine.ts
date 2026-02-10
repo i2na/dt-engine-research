@@ -27,7 +27,7 @@ export class DTEngine {
     private outlinePass: OutlinePass | null = null;
 
     private envMap: THREE.Texture | null = null;
-    private _bgColor = new THREE.Color(0x2f3238);
+    private _bgColor = new THREE.Color(0x0b1220);
     private _bgGradientCanvas: HTMLCanvasElement | null = null;
     private _bgGradientTexture: THREE.CanvasTexture | null = null;
     private _envBackgroundEnabled = false;
@@ -49,6 +49,14 @@ export class DTEngine {
     private renderMode: "material" | "wireframe" | "xray" = "material";
     private _selectionOutlineEnabled = true;
     private _modelOutlineEnabled = false;
+
+    private _cameraAnimStartPos = new THREE.Vector3();
+    private _cameraAnimEndPos = new THREE.Vector3();
+    private _cameraAnimStartTarget = new THREE.Vector3();
+    private _cameraAnimEndTarget = new THREE.Vector3();
+    private _cameraAnimStartTime = 0;
+    private _cameraAnimDuration = 0;
+    private static readonly CAMERA_ANIM_DURATION_MS = 650;
 
     public onElementSelected?: (metadata: ElementMetadata | null, latency: number) => void;
     public onStatsUpdate?: (stats: any) => void;
@@ -76,8 +84,8 @@ export class DTEngine {
 
         this.directionalLight = new THREE.DirectionalLight(0xffffff, 1.7);
         this.directionalLight.castShadow = true;
-        this.directionalLight.shadow.mapSize.width = 2048;
-        this.directionalLight.shadow.mapSize.height = 2048;
+        this.directionalLight.shadow.mapSize.width = 1024;
+        this.directionalLight.shadow.mapSize.height = 1024;
         this.directionalLight.shadow.camera.near = 0.5;
         this.directionalLight.shadow.camera.far = 1000;
         this.directionalLight.shadow.camera.left = -150;
@@ -125,7 +133,7 @@ export class DTEngine {
         this.setExposure(0.9);
         this.setEnvironmentIntensity(0.7);
         this.setShadowsEnabled(true);
-        this.setSSAOEnabled(true);
+        this.setSSAOEnabled(false);
 
         window.addEventListener("resize", this._onResize);
     }
@@ -135,10 +143,10 @@ export class DTEngine {
         this.scene.add(this.modelGroup);
 
         const guidToMesh = new Map(
-            this.glbLoader.getAllGuids().map((guid) => [guid, this.glbLoader.getMeshByGuid(guid)!]),
+            this.glbLoader.getAllGuids().map((guid) => [guid, this.glbLoader.getMeshByGuid(guid)!])
         );
         const meshToGuid = new Map(
-            Array.from(guidToMesh.entries()).map(([guid, mesh]) => [mesh, guid]),
+            Array.from(guidToMesh.entries()).map(([guid, mesh]) => [mesh, guid])
         );
         this.guidResolver = new GuidResolver(guidToMesh, meshToGuid);
 
@@ -154,6 +162,20 @@ export class DTEngine {
 
     render(): void {
         if (!this.backend) return;
+
+        if (this._cameraAnimStartTime > 0) {
+            const t = Math.min((performance.now() - this._cameraAnimStartTime) / this._cameraAnimDuration, 1);
+            const eased = 1 - Math.pow(1 - t, 3);
+            this.activeCamera.position.lerpVectors(this._cameraAnimStartPos, this._cameraAnimEndPos, eased);
+            if (this.controls) {
+                this.controls.target.lerpVectors(this._cameraAnimStartTarget, this._cameraAnimEndTarget, eased);
+                this.activeCamera.lookAt(this.controls.target);
+            }
+            if (t >= 1) {
+                this._cameraAnimStartTime = 0;
+            }
+        }
+
         this.controls?.update();
 
         if (this.composer) {
@@ -253,7 +275,7 @@ export class DTEngine {
         this.directionalLight.position.set(
             r * Math.cos(el) * Math.sin(az),
             r * Math.sin(el),
-            r * Math.cos(el) * Math.cos(az),
+            r * Math.cos(el) * Math.cos(az)
         );
     }
 
@@ -383,6 +405,49 @@ export class DTEngine {
         this.controls?.reset();
     }
 
+    animateResetView(): void {
+        if (!this.controls) return;
+        this._cameraAnimStartPos.copy(this.activeCamera.position);
+        this._cameraAnimEndPos.set(50, 50, 50);
+        this._cameraAnimStartTarget.copy(this.controls.target);
+        this._cameraAnimEndTarget.set(0, 0, 0);
+        this._cameraAnimStartTime = performance.now();
+        this._cameraAnimDuration = DTEngine.CAMERA_ANIM_DURATION_MS;
+    }
+
+    animateFitToView(): void {
+        if (!this.modelGroup || !this.controls) return;
+
+        const box = new THREE.Box3().setFromObject(this.modelGroup);
+        const center = box.getCenter(new THREE.Vector3());
+        const size = box.getSize(new THREE.Vector3());
+        const maxDim = Math.max(size.x, size.y, size.z);
+        const fov = this.perspCamera.fov * (Math.PI / 180);
+        const dist = Math.abs(maxDim / 2 / Math.tan(fov / 2)) * 1.5;
+        const endPos = new THREE.Vector3(
+            center.x + dist * 0.6,
+            center.y + dist * 0.5,
+            center.z + dist * 0.6
+        );
+
+        this._cameraAnimStartPos.copy(this.activeCamera.position);
+        this._cameraAnimEndPos.copy(endPos);
+        this._cameraAnimStartTarget.copy(this.controls.target);
+        this._cameraAnimEndTarget.copy(center);
+        this._cameraAnimStartTime = performance.now();
+        this._cameraAnimDuration = DTEngine.CAMERA_ANIM_DURATION_MS;
+
+        if (this.gridHelper) {
+            const wasVisible = this.gridHelper.visible;
+            const gridSize = Math.ceil(maxDim * 2);
+            this.scene.remove(this.gridHelper);
+            this.gridHelper = new THREE.GridHelper(gridSize, gridSize / 2, 0x333333, 0x1a1a1a);
+            this.gridHelper.position.y = box.min.y;
+            this.gridHelper.visible = wasVisible;
+            this.scene.add(this.gridHelper);
+        }
+    }
+
     fitToView(): void {
         if (!this.modelGroup) return;
 
@@ -396,7 +461,7 @@ export class DTEngine {
         this.activeCamera.position.set(
             center.x + dist * 0.6,
             center.y + dist * 0.5,
-            center.z + dist * 0.6,
+            center.z + dist * 0.6
         );
         this.activeCamera.lookAt(center);
 
@@ -477,7 +542,7 @@ export class DTEngine {
     private _setupPostProcessing(width: number, height: number): void {
         const renderer = this.backend!.renderer;
         this.composer = new EffectComposer(renderer);
-        this.composer.setPixelRatio(Math.min(2.0, window.devicePixelRatio));
+        this.composer.setPixelRatio(Math.min(1.25, window.devicePixelRatio));
 
         this.renderPass = new RenderPass(this.scene, this.activeCamera);
         this.composer.addPass(this.renderPass);
@@ -496,7 +561,7 @@ export class DTEngine {
         this.outlinePass = new OutlinePass(
             new THREE.Vector2(width, height),
             this.scene,
-            this.activeCamera,
+            this.activeCamera
         );
         this.outlinePass.pulsePeriod = 0;
         this.composer.addPass(this.outlinePass);
@@ -554,7 +619,7 @@ export class DTEngine {
         const ctx = canvas.getContext("2d");
         if (!ctx) return;
 
-        const top = new THREE.Color(0x0b1220);
+        const top = this._bgColor.clone();
         const bottom = new THREE.Color(0xffffff);
         const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
         gradient.addColorStop(0, `#${top.getHexString()}`);

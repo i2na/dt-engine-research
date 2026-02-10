@@ -126,16 +126,24 @@ function bindSidebarControls(engine: DTEngine) {
     const modeXray = document.getElementById("mode-xray")!;
     const modeAll = [modeMat, modeWire, modeXray];
 
-    modeMat.addEventListener("click", () => { engine.setRenderMode("material"); setActiveBtn(modeAll, modeMat); });
-    modeWire.addEventListener("click", () => { engine.setRenderMode("wireframe"); setActiveBtn(modeAll, modeWire); });
-    modeXray.addEventListener("click", () => { engine.setRenderMode("xray"); setActiveBtn(modeAll, modeXray); });
+    modeMat.addEventListener("click", () => {
+        engine.setRenderMode("material");
+        setActiveBtn(modeAll, modeMat);
+    });
+    modeWire.addEventListener("click", () => {
+        engine.setRenderMode("wireframe");
+        setActiveBtn(modeAll, modeWire);
+    });
+    modeXray.addEventListener("click", () => {
+        engine.setRenderMode("xray");
+        setActiveBtn(modeAll, modeXray);
+    });
 
     bindToggle("show-grid", (v) => engine.setGridVisible(v));
     bindToggle("show-axes", (v) => engine.setAxesVisible(v));
 
-    // --- Quick Actions ---
-    document.getElementById("reset-camera")!.addEventListener("click", () => engine.resetCamera());
-    document.getElementById("fit-all")!.addEventListener("click", () => engine.fitToView());
+    document.getElementById("reset-camera")!.addEventListener("click", () => location.reload());
+    document.getElementById("fit-all")!.addEventListener("click", () => engine.animateFitToView());
 }
 
 function bindCanvasInteraction(engine: DTEngine, canvas: HTMLCanvasElement) {

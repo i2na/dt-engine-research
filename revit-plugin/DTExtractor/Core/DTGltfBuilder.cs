@@ -39,19 +39,13 @@ namespace DTExtractor.Core
                     continue;
 
                 var positions = buf.GetPositionArray();
-                var normals = buf.GetNormalArray();
                 var indices = buf.Indices.ToArray();
                 var material = GetOrCreateMaterial(buf.MaterialData);
 
-                var prim = mesh.CreatePrimitive()
+                mesh.CreatePrimitive()
                     .WithVertexAccessor("POSITION", positions)
-                    .WithVertexAccessor("NORMAL", normals)
                     .WithIndicesAccessor(PrimitiveType.TRIANGLES, indices)
                     .WithMaterial(material);
-
-                var uvs = buf.GetUVArray();
-                if (uvs != null && uvs.Length == positions.Length)
-                    prim.WithVertexAccessor("TEXCOORD_0", uvs);
             }
 
             if (mesh.Primitives.Count == 0)
