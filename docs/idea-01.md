@@ -1,4 +1,4 @@
-# Idea
+# Idea-01
 
 **Autodesk Tandem/LMV 생태계 종속 제거를 위한 프로덕션급 엔진 설계**
 
@@ -33,8 +33,8 @@
 
 **핵심 산출물:**
 
-- **데이터 추출**: `.rvt` -> `.glb`(glTF 2.0) + `.parquet`(Apache Parquet). 국제 표준 개방 포맷.
-- **렌더링**: Rendering Abstraction Layer(RAL) 아래 WebGPU/WebGL 2.0 이중 백엔드. Three.js TSL 기반 셰이더 자동 변환.
+- **데이터 추출**: `.rvt` → `.glb`(glTF 2.0) + `.parquet`(Apache Parquet). 국제 표준 개방 포맷.
+- **렌더링**: Rendering Abstraction Layer(RAL) 아래 WebGPU/WebGL 2.0 이중 백엔드.
 - **속성 조회**: GUID 기반 4단 캐시(L1~L3 클라이언트 완결, 100ms 이내). DuckDB-WASM 브라우저 측 SQL 분석.
 - **확장성**: ECS + Core-Plugin 아키텍처로 도메인 기능을 독립 모듈로 배포/교체.
 
@@ -69,7 +69,7 @@ flowchart LR
 | 종속 지점                 | 상세                                                         | 사업적 위험                           |
 | ------------------------- | ------------------------------------------------------------ | ------------------------------------- |
 | **OTG 독점 포맷**         | 외부 생성/조작 불가. 모든 데이터 로드가 Autodesk 서버에 종속 | 서비스 중단 시 전체 시스템 마비       |
-| **APS Design Automation** | Revit -> OTG 변환이 Autodesk 클라우드에서만 수행 가능        | 변환 비용의 지속적 발생               |
+| **APS Design Automation** | Revit → OTG 변환이 Autodesk 클라우드에서만 수행 가능         | 변환 비용의 지속적 발생               |
 | **WebSocket 서버 종속**   | 속성 변이(Mutation)가 Tandem 서버 왕복 필수                  | 오프라인/로컬 우선 아키텍처 구현 불가 |
 | **라이선스 종속**         | Tandem SDK 사용 자체가 Autodesk 구독에 종속                  | 가격 변동에 대한 협상력 부재          |
 
@@ -114,9 +114,9 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-    R["Revit .rvt"] --> GE["GeometryExporter<br/>CustomExporter + IExportContext<br/>-> .glb (Draco + Instancing)"]
-    R --> ME["MetadataExtractor<br/>7종 파라미터 전수 추출<br/>-> .parquet (Snappy/Zstd)"]
-    R --> SI["SpatialIndexBuilder<br/>BVH 사전 계산<br/>-> Binary"]
+    R["Revit .rvt"] --> GE["GeometryExporter<br/>CustomExporter + IExportContext<br/>→ .glb (인스턴싱 최적화)"]
+    R --> ME["MetadataExtractor<br/>7종 파라미터 전수 추출<br/>→ .parquet (GZIP 압축)"]
+    R --> SI["SpatialIndexBuilder<br/>BVH 사전 계산<br/>→ Binary"]
 
     GE --> OS["Object Storage<br/>(S3, MinIO)"]
     ME --> PG["PostgreSQL<br/>+ Parquet 파일"]
@@ -165,10 +165,10 @@ flowchart TD
     R["Revit .rvt<br/>원본 모델"] --> GE["GeometryExporter<br/>CustomExporter + IExportContext"]
     R --> ME["MetadataExtractor<br/>Element.Parameters 전수 순회"]
 
-    GE --> GLB[".glb 출력<br/>Draco 압축 | GPU 인스턴싱<br/>GUID 내장 (EXT_structural_metadata)<br/>핵심 속성 바이너리 테이블"]
-    ME --> PQ[".parquet 출력<br/>컬럼 기반 저장 | Snappy/Zstd 압축<br/>GUID Primary Key<br/>DuckDB-WASM 직접 쿼리 가능"]
+    GE --> GLB[".glb 출력<br/>SharpGLTF 직렬화<br/>GUID를 노드 Extras(userData)에 내장"]
+    ME --> PQ[".parquet 출력<br/>컬럼 기반 저장 | GZIP 압축<br/>GUID Primary Key<br/>DuckDB-WASM 직접 쿼리 가능"]
 
-    GLB --> V["GUID 일치성 검증기<br/>형상 GUID == 속성 GUID"]
+    GLB --> V["런타임 GUID 매칭<br/>형상 GUID == 속성 GUID"]
     PQ --> V
 ```
 
@@ -195,101 +195,19 @@ flowchart TD
     VE --> F["Finish()<br/>최종 직렬화 (GLB + Parquet 출력)"]
 ```
 
-### 4.4. 형상 추출 핵심 구현
+### 4.4. 형상 추출 핵심 동작
 
-```csharp
-public class DTGeometryExporter : IExportContext
-{
-    private readonly Document _doc;
-    private readonly DTGltfBuilder _gltfBuilder;
-    private readonly DTMetadataCollector _metadataCollector;
+DTExtractor의 `DTGeometryExporter`는 `IExportContext`를 구현하며, 다음의 핵심 동작을 수행한다.
 
-    private Element _currentElement;
-    private string _currentGuid;
-    private Dictionary<string, int> _meshHashMap;
-
-    public DTGeometryExporter(Document doc, ExportConfig config)
-    {
-        _doc = doc;
-        _gltfBuilder = new DTGltfBuilder(config);
-        _metadataCollector = new DTMetadataCollector();
-        _meshHashMap = new Dictionary<string, int>();
-    }
-
-    public RenderNodeAction OnViewBegin(ViewNode node)
-    {
-        node.LevelOfDetail = _config.TessellationLevel;
-        return RenderNodeAction.Proceed;
-    }
-
-    public RenderNodeAction OnElementBegin(ElementId elementId)
-    {
-        _currentElement = _doc.GetElement(elementId);
-        _currentGuid = _currentElement.UniqueId;
-        _metadataCollector.ExtractElement(_currentElement);
-        return RenderNodeAction.Proceed;
-    }
-
-    public void OnPolymesh(PolymeshTopology polymesh)
-    {
-        var vertices = polymesh.GetPoints();
-        var normals = polymesh.GetNormals();
-        var uvs = polymesh.GetUVs();
-        var facets = polymesh.GetFacets();
-
-        string meshHash = ComputeMeshHash(vertices, facets);
-
-        if (_meshHashMap.ContainsKey(meshHash))
-        {
-            // 기존 메쉬 재사용 -> 인스턴싱
-            _gltfBuilder.AddInstance(
-                _meshHashMap[meshHash],
-                _currentElement.GetTransform(),
-                _currentGuid
-            );
-        }
-        else
-        {
-            // 신규 메쉬 등록
-            int meshIndex = _gltfBuilder.AddMesh(
-                vertices, normals, uvs, facets
-            );
-            _meshHashMap[meshHash] = meshIndex;
-            _gltfBuilder.AddInstance(
-                meshIndex,
-                _currentElement.GetTransform(),
-                _currentGuid
-            );
-        }
-    }
-
-    public void OnMaterial(MaterialNode materialNode)
-    {
-        _gltfBuilder.SetCurrentMaterial(
-            color: materialNode.Color,
-            transparency: materialNode.Transparency,
-            smoothness: materialNode.Smoothness,
-            textureAsset: GetTextureAsset(materialNode)
-        );
-    }
-
-    public void Finish()
-    {
-        _gltfBuilder.SerializeToGlb(_config.OutputPath);
-        _metadataCollector.SerializeToParquet(_config.OutputPath);
-    }
-}
-```
-
-**핵심 설계 포인트:**
-
-- **GUID 확보 시점**: `OnElementBegin()`에서 `_currentElement.UniqueId`를 즉시 확보한다. 이 GUID가 이후 모든 데이터 계층을 관통하는 유일한 연결 키가 된다.
-- **형상과 속성의 동시 추출**: `OnElementBegin()`에서 `_metadataCollector.ExtractElement()`를 호출하여, 형상 콜백과 동시에 속성 추출이 진행된다. 하나의 모델 순회로 양쪽 출력이 모두 생성된다.
-- **인스턴싱 최적화**: `OnPolymesh()`에서 수신되는 정점/면 데이터의 해시를 계산하여 동일 형상을 감지한다. Revit 모델에서 동일한 패밀리 타입(문, 창문, 기둥)은 동일한 메쉬를 공유하므로, glTF의 `EXT_mesh_gpu_instancing` 확장으로 인스턴스 데이터(위치, 회전, 스케일)만 기록한다. 원본 대비 **5~10배 파일 크기 절감**이 가능하다.
+- **GUID 확보 시점**: `OnElementBegin()`에서 현재 요소의 `UniqueId`를 즉시 확보한다. 이 GUID가 이후 모든 데이터 계층을 관통하는 유일한 연결 키가 된다.
+- **형상과 속성의 동시 추출**: `OnElementBegin()`에서 `MetadataCollector`를 호출하여, 형상 콜백과 동시에 속성 추출이 진행된다. 하나의 모델 순회로 양쪽 출력이 모두 생성된다.
+- **머티리얼 추출**: `OnMaterial()`에서 50종 이상의 Revit 머티리얼 스키마(Prism, Classic 등)를 개별 매핑하여 색상, 투명도, 질감 정보를 추출한다. 폴백 체인을 통해 누락 없이 색상을 확보한다.
+- **메쉬 해시 기반 중복 감지**: `OnPolymesh()`에서 수신되는 정점/면 데이터의 해시를 계산하여 동일 형상을 감지한다. Revit 모델에서 동일한 패밀리 타입(문, 창문, 기둥)은 동일한 메쉬를 공유하므로, 중복 메쉬를 재사용하여 파일 크기를 절감한다.
+- **GLB 직렬화**: 순회 완료 후 SharpGLTF 라이브러리를 통해 GLB 파일을 생성한다. 각 노드의 `Extras`에 GUID와 이름을 JSON으로 내장하여, 웹 뷰어에서 `userData.guid`로 접근할 수 있게 한다.
 
 ### 4.5. 메타데이터 추출: 7종 파라미터 전수 수집
 
-Revit 속성 데이터의 100% 무손실 추출이 이 엔진의 핵심 차별점이다. Revit의 파라미터 체계는 7종으로 분류되며, 단일 API 호출로는 모든 데이터를 확보할 수 없다.
+Revit 속성 데이터의 무손실 추출이 이 엔진의 핵심 차별점이다. Revit의 파라미터 체계는 7종으로 분류되며, 단일 API 호출로는 모든 데이터를 확보할 수 없다.
 
 | 파라미터 유형    | 접근 경로                                     | 특성                             |
 | ---------------- | --------------------------------------------- | -------------------------------- |
@@ -301,87 +219,11 @@ Revit 속성 데이터의 100% 무손실 추출이 이 엔진의 핵심 차별�
 | **BuiltIn**      | `Element.get_Parameter(BuiltInParameter)`     | Revit 내장 시스템 파라미터       |
 | **패밀리**       | `FamilyManager.Parameters` (패밀리 편집기 내) | 패밀리 정의 시점 파라미터        |
 
-**전수 추출 구현:**
-
-```csharp
-public class DTMetadataCollector
-{
-    public DTElementRecord ExtractElement(Element element)
-    {
-        var record = new DTElementRecord
-        {
-            Guid = element.UniqueId,
-            ElementId = element.Id.IntegerValue,
-            Category = element.Category?.Name,
-            CategoryId = element.Category?.Id.IntegerValue,
-            Level = GetLevelName(element),
-            Phase = GetPhaseName(element),
-        };
-
-        // 1. 인스턴스 파라미터
-        record.InstanceParameters = ExtractParameters(
-            element.Parameters, ParameterSource.Instance
-        );
-
-        // 2. 타입 파라미터
-        if (element is FamilyInstance fi && fi.Symbol != null)
-        {
-            record.FamilyName = fi.Symbol.Family.Name;
-            record.TypeName = fi.Symbol.Name;
-            record.TypeParameters = ExtractParameters(
-                fi.Symbol.Parameters, ParameterSource.Type
-            );
-        }
-        else if (element.GetTypeId() != ElementId.InvalidElementId)
-        {
-            var typeElement = element.Document.GetElement(
-                element.GetTypeId()
-            );
-            if (typeElement != null)
-            {
-                record.TypeName = typeElement.Name;
-                record.TypeParameters = ExtractParameters(
-                    typeElement.Parameters, ParameterSource.Type
-                );
-            }
-        }
-
-        // 3. BuiltIn 파라미터
-        record.BuiltInParameters = ExtractBuiltInParameters(element);
-
-        return record;
-    }
-
-    private List<DTParameterRecord> ExtractParameters(
-        ParameterSet parameters, ParameterSource source)
-    {
-        var result = new List<DTParameterRecord>();
-        foreach (Parameter param in parameters)
-        {
-            if (!param.HasValue) continue;
-
-            result.Add(new DTParameterRecord
-            {
-                Name = param.Definition.Name,
-                Source = source,
-                StorageType = param.StorageType.ToString(),
-                Value = GetParameterValue(param),
-                DisplayValue = GetDisplayValue(param),
-                IsShared = param.IsShared,
-                SharedGuid = param.IsShared ? param.GUID.ToString() : null,
-                Group = GetParameterGroup(param),
-                UnitType = GetUnitType(param),
-                IsReadOnly = param.IsReadOnly,
-            });
-        }
-        return result;
-    }
-}
-```
+`DTMetadataCollector`는 이 7종 파라미터를 개별 순회하여 하나의 Parquet 레코드에 통합한다. 추출된 데이터는 Parquet.Net 라이브러리를 통해 20개 컬럼의 GZIP 압축 Parquet 파일로 직렬화되며, 파라미터 값은 JSON 문자열로 직렬화하여 저장한다.
 
 **데이터 무결성 보장:**
 
-- **내부 단위 보존**: `AsDouble()`은 Revit 내부 단위(길이: 피트, 각도: 라디안)를 반환한다. 변환 없이 원본 값을 저장하고, 표시 시점에서 `ForgeTypeId`를 참조하여 사용자 단위로 변환한다. 단위 변환 과정의 정밀도 손실을 원천 차단한다.
+- **내부 단위 보존**: Revit 내부 단위(길이: 피트, 각도: 라디안)를 변환 없이 원본 그대로 저장한다. 단위 변환 과정의 정밀도 손실을 원천 차단한다.
 - **ElementId 참조 해결**: `StorageType.ElementId`인 파라미터는 해당 요소의 `UniqueId`로 변환하여 저장함으로써, 모델 외부에서도 참조 관계를 보존한다.
 - **공유 파라미터 GUID**: `Parameter.IsShared`가 true인 경우 `Parameter.GUID`를 별도 저장하여, 프로젝트 간 동일 파라미터의 식별이 가능하도록 한다.
 
@@ -392,49 +234,42 @@ GUID가 GLB와 Parquet 양쪽에 어떻게 내장되는지가 전체 아키텍�
 ```mermaid
 flowchart TD
     RE["Revit Element<br/>UniqueId: e1a2b3c4-..."] --> G["GUID 분기 시점<br/>OnElementBegin() 콜백"]
-    G --> GLB["GLB 파일<br/>EXT_structural_metadata 바이너리 테이블<br/>EXT_mesh_features Feature ID 매핑"]
-    G --> PQ["Parquet 파일<br/>guid 컬럼 (Primary Key)<br/>Snappy/Zstd 압축<br/>HTTP Range 부분 로드 가능"]
-    GLB --> RT["런타임 결합<br/>GPU ID 버퍼 -> GUID -> Parquet 쿼리"]
+    G --> GLB["GLB 파일<br/>glTF 노드의 Extras(userData)에<br/>guid, name을 JSON으로 내장"]
+    G --> PQ["Parquet 파일<br/>guid 컬럼 (Primary Key)<br/>GZIP 압축"]
+    GLB --> RT["런타임 결합<br/>레이캐스팅 → userData.guid → Parquet 쿼리"]
     PQ --> RT
 ```
 
-**무결성 검증**: 추출 완료 후, GUID 일치성 검증기가 GLB에 내장된 GUID 목록과 Parquet의 GUID 목록을 자동 대조한다. 불일치 발생 시 추출 프로세스가 실패로 처리된다.
+웹 뷰어에서 GLB를 로드하면 각 노드의 `userData.guid`에서 GUID를 읽어 메쉬-GUID 매핑 테이블을 구성한다. 사용자 클릭 시 레이캐스팅으로 메쉬를 식별하고, 이 매핑 테이블에서 GUID를 조회한 뒤 Parquet에서 전체 속성을 가져온다.
 
 ### 4.7. 출력 포맷 상세
 
-**형상 출력 -- 확장 glTF 2.0 (GLB):**
+**형상 출력 -- glTF 2.0 (GLB):**
 
-| 확장                         | 용도                                                |
-| ---------------------------- | --------------------------------------------------- |
-| `KHR_draco_mesh_compression` | 메쉬 데이터 40~80% 압축                             |
-| `EXT_mesh_gpu_instancing`    | 동일 형상 인스턴싱 (배치 변환만 기록)               |
-| `EXT_structural_metadata`    | 핵심 속성(GUID, 이름, 카테고리, 레벨) 바이너리 내장 |
-| `EXT_mesh_features`          | 메쉬 내 개별 BIM 객체 식별 (Feature ID)             |
+DTExtractor는 SharpGLTF 라이브러리를 사용하여 표준 glTF 2.0 Binary(GLB) 파일을 생성한다. 각 BIM 요소는 glTF 노드로 매핑되며, 노드의 `Extras` 필드에 GUID와 이름이 JSON으로 내장된다. 머티리얼은 PBR Metallic-Roughness 모델로 변환되고, 투명도가 있는 요소는 BLEND 알파 모드를 사용한다. 모든 머티리얼은 양면(DoubleSided) 렌더링으로 설정된다.
 
-**속성 출력 -- Apache Parquet (JSON 대체):**
+**속성 출력 -- Apache Parquet:**
 
 1. **컬럼 기반 저장**: BIM 속성의 분석적 쿼리(예: "내화등급 2시간 이상인 벽체")에 최적화된 구조
 2. **DuckDB-WASM 직접 쿼리**: 브라우저에서 서버 없이 직접 SQL 쿼리 가능
 3. **HTTP Range 요청**: 전체 파일 다운로드 없이 필요한 행 그룹/컬럼만 부분 로드
-4. **압축 효율**: Snappy/Zstd 압축으로 JSON 대비 70~90% 용량 절감
-5. **Arrow 호환**: 메모리 내 제로카피 데이터 전달
+4. **GZIP 압축**: JSON 대비 대폭 용량 절감
+5. **20개 컬럼 스키마**: GUID, ElementId, Category, FamilyName, TypeName, Level, Phase, BoundingBox(6축), 파라미터(JSON 문자열) 등
 
 ### 4.8. 플러그인 배포 및 배치 자동화
 
 | 항목          | 설계                                                                |
 | ------------- | ------------------------------------------------------------------- |
 | **배포 방식** | Revit Add-In Manager 호환 `.addin` 매니페스트 + MSI/MSIX 인스톨러   |
-| **버전 호환** | Revit 2022~2026 지원. 연간 API 변경사항을 멀티타겟 빌드로 대응      |
-| **실행 모드** | 대화형(GUI 버튼) + 배치 모드(CLI 인수를 통한 자동 실행)             |
+| **버전 호환** | Revit 2023~2024 지원. 조건부 컴파일로 연도별 API 차이에 대응        |
+| **실행 모드** | 대화형(GUI 리본 버튼) + 배치 모드(CLI 인수를 통한 자동 실행)        |
 | **배치 처리** | Revit Batch Processor 또는 자체 CLI 래퍼를 통한 복수 모델 순차 처리 |
-| **출력 검증** | 추출 완료 후 GUID 일치성 검증기 자동 실행                           |
 
 ```mermaid
 flowchart LR
     A["모델 감시 서비스<br/>FileSystemWatcher"] -->|".rvt 변경 감지"| B["Revit Batch Processor"]
-    B -->|"DTExtractor 자동 실행"| C["GLB + Parquet + BVH"]
-    C -->|"GUID 일치성 검증"| D["저장소 업로드"]
-    D -->|"캐시 무효화 이벤트"| E["웹 뷰어 갱신"]
+    B -->|"DTExtractor 자동 실행"| C["GLB + Parquet"]
+    C -->|"저장소 업로드"| D["웹 뷰어 갱신"]
 ```
 
 ---
@@ -460,91 +295,19 @@ flowchart LR
 
 ### 5.3. PostgreSQL 스키마
 
-```sql
-CREATE TABLE elements (
-    guid            TEXT PRIMARY KEY,
-    element_id      INTEGER NOT NULL,
-    category        TEXT NOT NULL,
-    category_id     INTEGER,
-    family_name     TEXT,
-    type_name       TEXT,
-    level_name      TEXT,
-    phase_name      TEXT,
-    model_version   INTEGER NOT NULL,
-    created_at      TIMESTAMPTZ DEFAULT NOW()
-);
+서버 측 속성 저장소는 PostgreSQL 기반으로 설계한다. 핵심 테이블은 다음과 같다.
 
-CREATE TABLE instance_parameters (
-    guid            TEXT REFERENCES elements(guid),
-    parameters      JSONB NOT NULL,
-    PRIMARY KEY (guid)
-);
+- **elements**: GUID를 PK로 하는 기본 요소 테이블. ElementId, Category, FamilyName, TypeName, Level, Phase, 모델 버전 등을 저장한다.
+- **instance_parameters**: 요소별 인스턴스 파라미터를 JSONB로 저장한다. GUID로 elements 테이블을 참조한다.
+- **type_parameters**: 타입 키별 파라미터를 JSONB로 저장한다. 동일 타입의 요소들이 공유하므로 중복 저장을 방지한다.
+- **shared_parameter_definitions**: 공유 파라미터의 정의(GUID, 이름, 데이터 타입, 단위)를 관리한다.
+- **model_versions**: 모델별 추출 이력과 메타정보를 관리한다.
 
-CREATE TABLE type_parameters (
-    type_key        TEXT PRIMARY KEY,
-    parameters      JSONB NOT NULL
-);
-
-CREATE TABLE shared_parameter_definitions (
-    shared_guid     TEXT PRIMARY KEY,
-    name            TEXT NOT NULL,
-    data_type       TEXT NOT NULL,
-    unit_type       TEXT,
-    description     TEXT
-);
-
-CREATE TABLE model_versions (
-    version_id      SERIAL PRIMARY KEY,
-    model_id        TEXT NOT NULL,
-    extracted_at    TIMESTAMPTZ NOT NULL,
-    revit_version   TEXT,
-    file_hash       TEXT,
-    element_count   INTEGER,
-    metadata        JSONB
-);
-
-CREATE INDEX idx_elements_category ON elements(category);
-CREATE INDEX idx_elements_level ON elements(level_name);
-CREATE INDEX idx_instance_params_gin ON instance_parameters USING GIN(parameters);
-```
+Category, Level에 B-tree 인덱스를, instance_parameters의 JSONB에 GIN 인덱스를 적용하여 다양한 조회 패턴을 최적화한다.
 
 ### 5.4. DuckDB-WASM 브라우저 측 분석
 
-DuckDB-WASM은 WebAssembly로 컴파일된 DuckDB 엔진이다. 서버에 쿼리를 전송하는 대신, 클라이언트가 원격 Parquet 파일을 HTTP Range 요청으로 부분 로드하여 브라우저 내에서 직접 SQL을 실행한다.
-
-```typescript
-class BrowserPropertyAnalyzer {
-    private db: duckdb.AsyncDuckDB;
-    private conn: duckdb.AsyncDuckDBConnection;
-
-    async queryFireRatedWalls(parquetUrl: string): Promise<any[]> {
-        const result = await this.conn.query(`
-            SELECT guid, name, category,
-                   parameters->>'Fire Rating' as fire_rating,
-                   parameters->>'Area' as area
-            FROM read_parquet('${parquetUrl}')
-            WHERE category = 'Walls'
-              AND CAST(parameters->>'Fire Rating (Hours)' AS DOUBLE) >= 2.0
-            ORDER BY area DESC
-        `);
-        return result.toArray();
-    }
-
-    async getBuildingStatistics(parquetUrl: string): Promise<BuildingStats> {
-        const result = await this.conn.query(`
-            SELECT
-                category,
-                COUNT(*) as count,
-                COUNT(DISTINCT parameters->>'Type Name') as type_count,
-                AVG(CAST(parameters->>'Area' AS DOUBLE)) as avg_area
-            FROM read_parquet('${parquetUrl}')
-            GROUP BY category
-            ORDER BY count DESC
-        `);
-        return result.toArray();
-    }
-}
-```
+DuckDB-WASM은 WebAssembly로 컴파일된 DuckDB 엔진이다. 서버에 쿼리를 전송하는 대신, 클라이언트가 Parquet 파일을 HTTP Range 요청으로 부분 로드하여 브라우저 내에서 직접 SQL을 실행한다. Web Worker에서 DuckDB 인스턴스를 생성하고, `read_parquet()` 함수로 Parquet 파일에 직접 SQL 쿼리를 수행한다.
 
 | DuckDB-WASM 특성       | 효과                                                            |
 | ---------------------- | --------------------------------------------------------------- |
@@ -562,7 +325,7 @@ Revit `UniqueId`(GUID)를 모든 데이터 레이어를 관통하는 유일한 �
 ```mermaid
 flowchart TD
     GUID["Revit UniqueId (GUID)<br/>e1a2b3c4-5678-90ab-cdef-1234567890ab"]
-    GUID --> V["형상 (Visual)<br/>glTF EXT_structural_metadata"]
+    GUID --> V["형상 (Visual)<br/>glTF 노드 Extras (userData.guid)"]
     GUID --> S["속성 (Semantic)<br/>Parquet / PostgreSQL PK"]
     GUID --> A["분석 (Analytics)<br/>DuckDB-WASM GUID 컬럼"]
     GUID --> SP["공간 (Spatial)<br/>BVH 노드별 GUID 리스트"]
@@ -572,15 +335,15 @@ flowchart TD
     style GUID fill:#ffd54f,color:#000,stroke:#f57f17
 ```
 
-| 데이터 레이어             | 포맷                    | GUID 저장 위치                            | 갱신 빈도         |
-| ------------------------- | ----------------------- | ----------------------------------------- | ----------------- |
-| 형상 (Visual)             | glTF/GLB                | `EXT_structural_metadata` 바이너리 테이블 | 모델 변경 시      |
-| 핵심 속성 (Inline)        | GLB 내장                | `EXT_structural_metadata`                 | 모델 변경 시      |
-| 전체 속성 (Semantic)      | Parquet / PostgreSQL    | Primary Key                               | 모델 변경 시      |
-| 분석 캐시 (Analytics)     | DuckDB-WASM / Parquet   | GUID 컬럼                                 | 쿼리 시 on-demand |
-| 공간 인덱스 (Spatial)     | 바이너리 BVH            | 노드별 GUID 리스트                        | 모델 변경 시      |
-| IoT 스트림 (Realtime)     | WebSocket / TimescaleDB | 스트림-에셋 매핑 테이블                   | 실시간            |
-| 원본 아카이브 (Canonical) | IFC 4.3                 | GlobalId                                  | 모델 변경 시      |
+| 데이터 레이어             | 포맷                    | GUID 저장 위치                       | 갱신 빈도         |
+| ------------------------- | ----------------------- | ------------------------------------ | ----------------- |
+| 형상 (Visual)             | glTF/GLB                | 노드 `Extras` (`userData.guid`)      | 모델 변경 시      |
+| 핵심 속성 (Inline)        | GLB 내장                | 노드 `Extras` (`userData.guid/name`) | 모델 변경 시      |
+| 전체 속성 (Semantic)      | Parquet / PostgreSQL    | Primary Key                          | 모델 변경 시      |
+| 분석 캐시 (Analytics)     | DuckDB-WASM / Parquet   | GUID 컬럼                            | 쿼리 시 on-demand |
+| 공간 인덱스 (Spatial)     | 바이너리 BVH            | 노드별 GUID 리스트                   | 모델 변경 시      |
+| IoT 스트림 (Realtime)     | WebSocket / TimescaleDB | 스트림-에셋 매핑 테이블              | 실시간            |
+| 원본 아카이브 (Canonical) | IFC 4.3                 | GlobalId                             | 모델 변경 시      |
 
 ### 5.6. "Click-to-Data" 루프: 4단 캐시 시스템
 
@@ -589,10 +352,10 @@ flowchart TD
 ```mermaid
 flowchart TD
     CLICK["사용자 클릭<br/>(마우스 좌표 x, y)"]
-    CLICK --> S1["GPU ID 버퍼 읽기<br/>MRT ID Attachment에서<br/>(x,y) 좌표의 GUID 인덱스 식별<br/>지연: < 1ms"]
-    S1 --> S2["L1: glTF 인라인 속성<br/>EXT_structural_metadata에서<br/>이름/카테고리/레벨 즉시 표시<br/>지연: 0ms"]
+    CLICK --> S1["레이캐스팅<br/>Three.js Raycaster로<br/>클릭 좌표의 메쉬 식별<br/>메쉬-GUID 매핑에서 GUID 확보"]
+    S1 --> S2["L1: 인메모리 캐시<br/>GLB 로드 시 userData에서<br/>guid·카테고리 정보를 Map에 사전 적재<br/>지연: 0ms"]
     S2 --> S3["L2: IndexedDB 캐시<br/>GUID 키로 로컬 캐시 조회<br/>히트 시 전체 속성 표시<br/>지연: < 5ms"]
-    S3 --> S4["L3: DuckDB-WASM<br/>HTTP Range로 Parquet 부분 로드<br/>SQL 실행, 결과 L2 캐시 저장<br/>지연: < 100ms"]
+    S3 --> S4["L3: DuckDB-WASM<br/>Parquet 파일에 직접 SQL 실행<br/>결과를 L2 캐시에 저장<br/>지연: < 100ms"]
     S4 --> S5["L4: PostgreSQL 서버 API<br/>변경 이력, 교차 모델 참조 등<br/>서버 전용 데이터<br/>지연: < 300ms"]
 
     style S1 fill:#c8e6c9,stroke:#388e3c
@@ -602,12 +365,12 @@ flowchart TD
     style S5 fill:#ffccbc,stroke:#e64a19
 ```
 
-| 계층   | 데이터 소스                           | 지연 시간 | 대상 데이터                                   |
-| ------ | ------------------------------------- | --------- | --------------------------------------------- |
-| **L1** | glTF 내장 (`EXT_structural_metadata`) | 0ms       | GUID, 이름, 카테고리, 레벨                    |
-| **L2** | IndexedDB (브라우저 로컬)             | < 5ms     | 최근 조회 객체의 전체 속성 (캐시 히트 시)     |
-| **L3** | DuckDB-WASM (Parquet 직접 쿼리)       | < 100ms   | 전체 속성, 서버 경유 없이 클라이언트 처리     |
-| **L4** | PostgreSQL (서버 API)                 | < 300ms   | 변경 이력, 교차 모델 참조 등 서버 전용 데이터 |
+| 계층   | 데이터 소스                                    | 지연 시간 | 대상 데이터                                   |
+| ------ | ---------------------------------------------- | --------- | --------------------------------------------- |
+| **L1** | 인메모리 Map (GLB 로드 시 `userData`에서 적재) | 0ms       | GUID, 이름, 카테고리                          |
+| **L2** | IndexedDB (브라우저 로컬)                      | < 5ms     | 최근 조회 객체의 전체 속성 (캐시 히트 시)     |
+| **L3** | DuckDB-WASM (Parquet 직접 쿼리)                | < 100ms   | 전체 속성, 서버 경유 없이 클라이언트 처리     |
+| **L4** | PostgreSQL (서버 API)                          | < 300ms   | 변경 이력, 교차 모델 참조 등 서버 전용 데이터 |
 
 대부분의 속성 조회는 L1~L3 계층 내에서 **100ms 이내에 완료**된다. Tandem 구조에서 모든 속성 조회가 Autodesk 서버 왕복을 필요로 했던 것과 대비되는 근본적 개선이다.
 
@@ -644,36 +407,7 @@ flowchart TD
 
 ### 6.3. RAL 핵심 인터페이스
 
-```typescript
-interface IRenderBackend {
-    readonly type: "webgpu" | "webgl2";
-    readonly capabilities: BackendCapabilities;
-
-    initialize(canvas: HTMLCanvasElement): Promise<void>;
-    dispose(): void;
-
-    createVertexBuffer(data: Float32Array): IBuffer;
-    createIndexBuffer(data: Uint32Array): IBuffer;
-    createUniformBuffer(size: number): IBuffer;
-    createTexture(descriptor: TextureDescriptor): ITexture;
-    createPipeline(descriptor: PipelineDescriptor): IPipeline;
-    beginRenderPass(descriptor: RenderPassDescriptor): IRenderPass;
-    submit(): void;
-
-    // BIM 특화
-    renderInstanced(mesh: IMesh, instances: InstanceBuffer): void;
-    readPixelId(x: number, y: number): number;
-}
-
-interface BackendCapabilities {
-    computeShaders: boolean; // WebGPU only
-    indirectDraw: boolean; // WebGPU + WebGL2(MULTI_DRAW)
-    maxTextureSize: number;
-    maxBufferSize: number;
-    multiDrawIndirect: boolean; // WebGPU only (완전)
-    gpuDrivenCulling: boolean; // WebGPU only
-}
-```
+RAL(Rendering Abstraction Layer)은 `IRenderBackend` 인터페이스를 통해 WebGPU/WebGL 2.0 백엔드를 추상화한다. 이 인터페이스는 버퍼/텍스처 생성, 렌더 파이프라인 구성, 렌더 패스 실행, 인스턴싱 렌더, 픽셀 ID 읽기 등의 공통 메서드를 정의하며, 각 백엔드가 자체 방식으로 구현한다. `BackendCapabilities` 구조체를 통해 Compute Shader, Indirect Draw, Multi-Draw 등의 지원 여부를 런타임에 조회할 수 있다.
 
 ### 6.4. WebGPU 백엔드: 고성능 렌더링 파이프라인
 
@@ -685,7 +419,7 @@ flowchart TD
     A --> B["Compute Shader: 프러스텀 컬링<br/>모든 객체 AABB 병렬 교차 판정<br/>수십만 BIM 객체 단일 디스패치"]
     B --> C["Compute Shader: Hi-Z 오클루전 컬링<br/>이전 프레임 깊이 Mip-chain 축소<br/>벽체 뒤 가려진 객체 GPU 측 제거"]
     C --> D["Indirect Draw Buffer 생성<br/>컬링 통과 객체만 기록"]
-    D --> E["Multi-Draw Indirect<br/>단일 draw call로 전체 가시 객체 렌더<br/>수만 draw call -> 1개로 병합"]
+    D --> E["Multi-Draw Indirect<br/>단일 draw call로 전체 가시 객체 렌더<br/>수만 draw call → 1개로 병합"]
     E --> F["MRT 출력<br/>0: Color | 1: ID (GUID 인덱스) | 2: Depth"]
     F --> G["후처리 (Compute/Fragment)<br/>SSAO, 아웃라인, 선택 하이라이팅"]
 ```
@@ -694,14 +428,14 @@ flowchart TD
 
 WebGPU를 사용할 수 없는 환경에서 동일한 시각적 결과를 보장한다. 기능 축소가 아니라, WebGL 2.0의 최대 역량을 활용하는 독자적 최적화 렌더러이다.
 
-| 처리 단계            | WebGPU 백엔드             | WebGL 2.0 백엔드                         |
-| -------------------- | ------------------------- | ---------------------------------------- |
-| **비가시 객체 제거** | GPU Compute Shader        | CPU 기반 BVH 탐색 (Web Worker 병렬)      |
-| **Draw Call 최적화** | Multi-Draw Indirect       | `WEBGL_multi_draw` 확장 + BatchedMesh    |
-| **인스턴싱**         | `EXT_mesh_gpu_instancing` | `drawElementsInstanced` (WebGL 2.0 내장) |
-| **ID 렌더링**        | MRT + Storage Buffer      | MRT (`drawBuffers`) + Float 텍스처       |
-| **셰이더 언어**      | WGSL                      | GLSL ES 3.0                              |
-| **후처리**           | Compute Shader 기반       | Fragment Shader 풀스크린 패스            |
+| 처리 단계            | WebGPU 백엔드        | WebGL 2.0 백엔드                         |
+| -------------------- | -------------------- | ---------------------------------------- |
+| **비가시 객체 제거** | GPU Compute Shader   | CPU 기반 BVH 탐색 (Web Worker 병렬)      |
+| **Draw Call 최적화** | Multi-Draw Indirect  | `WEBGL_multi_draw` 확장 + BatchedMesh    |
+| **인스턴싱**         | GPU 인스턴싱         | `drawElementsInstanced` (WebGL 2.0 내장) |
+| **ID 렌더링**        | MRT + Storage Buffer | MRT (`drawBuffers`) + Float 텍스처       |
+| **셰이더 언어**      | WGSL                 | GLSL ES 3.0                              |
+| **후처리**           | Compute Shader 기반  | Fragment Shader 풀스크린 패스            |
 
 **WebGL 2.0 핵심 최적화:**
 
@@ -709,36 +443,14 @@ WebGPU를 사용할 수 없는 환경에서 동일한 시각적 결과를 보장
 - **`WEBGL_multi_draw`**: Chrome/Edge에서 지원. WebGL 2.0에서도 복수 draw call을 단일 호출로 병합한다.
 - **BatchedMesh**: Three.js r162+의 `BatchedMesh` 개념을 차용. 동일 머티리얼 메쉬를 하나의 대형 버퍼에 병합하여 draw call을 대폭 감소시킨다.
 
-### 6.6. Shader 역할과 TSL 호환성 전략
+### 6.6. Shader 역할과 호환성 전략
 
 Shader는 두 가지 핵심 역할을 수행한다.
 
 - **시각 효과**: PBR 조명, SSAO, 아웃라인, IoT 히트맵 오버레이, X-ray/고스트 모드
 - **객체 식별**: Vertex Shader의 `objectId` 속성을 MRT 두 번째 타겟으로 출력하여, 픽셀별 BIM 객체 GUID 인덱스를 기록한다. 마우스 좌표로 ID 버퍼를 읽으면 GUID를 즉시 식별할 수 있다.
 
-**TSL(Three Shading Language) 패턴으로 이중 작성 방지:**
-
-WebGPU는 WGSL, WebGL은 GLSL을 사용한다. 노드 기반 셰이더 그래프를 정의하고, 백엔드에 따라 WGSL 또는 GLSL로 자동 변환함으로써 셰이더 이중 유지보수를 제거한다.
-
-```typescript
-const bimShader = defineShaderGraph({
-    vertex: {
-        position: transform(attribute("position"), uniform("modelViewProjection")),
-        normal: normalize(transform(attribute("normal"), uniform("normalMatrix"))),
-        objectId: attribute("objectId"),
-    },
-    fragment: {
-        color: multiply(
-            sampleTexture(uniform("diffuseMap"), varying("uv")),
-            lightingPBR(varying("normal"), uniform("lightDirection"))
-        ),
-        id: encodeId(varying("objectId")),
-    },
-});
-
-const wgslCode = compileToWGSL(bimShader); // WebGPU
-const glslCode = compileToGLSL(bimShader); // WebGL 2.0
-```
+WebGPU는 WGSL, WebGL은 GLSL을 사용한다. 셰이더 이중 유지보수를 방지하기 위해, 노드 기반 셰이더 그래프를 정의하고 백엔드에 따라 WGSL 또는 GLSL로 자동 변환하는 TSL(Three Shading Language) 패턴을 활용한다.
 
 ### 6.7. 시각적 일관성 보증
 
@@ -758,41 +470,7 @@ const glslCode = compileToGLSL(bimShader); // WebGL 2.0
 | **Component** | 데이터 버킷                   | 엔티티에 부착되는 순수 데이터                    |
 | **System**    | 처리 로직                     | 특정 컴포넌트 조합을 가진 엔티티를 대상으로 동작 |
 
-```typescript
-interface TransformComponent {
-    position: Float32Array; // [x, y, z]
-    rotation: Float32Array; // [qx, qy, qz, qw]
-    scale: Float32Array; // [sx, sy, sz]
-    boundingBox: Float32Array; // [minX, minY, minZ, maxX, maxY, maxZ]
-}
-
-interface VisualComponent {
-    meshId: number;
-    materialId: number;
-    visible: boolean;
-    highlighted: boolean;
-    opacity: number;
-    colorOverride: Uint8Array | null;
-}
-
-interface MetadataComponent {
-    guid: string;
-    name: string;
-    category: string;
-    level: string;
-    familyName: string;
-    typeName: string;
-}
-
-interface IoTComponent {
-    streamIds: string[];
-    currentValues: Map<string, number>;
-    lastUpdated: number;
-    thresholds: { min: number; max: number }[];
-}
-```
-
-컴포넌트 데이터는 SoA(Structure of Arrays) 방식으로 저장하여 CPU 캐시 효율을 극대화하고, GPU 버퍼로의 직접 업로드를 가능하게 한다.
+BIM 요소에 부착되는 컴포넌트는 Transform(위치/회전/스케일/바운딩박스), Visual(메쉬ID/머티리얼ID/가시성/하이라이트/투명도), Metadata(GUID/이름/카테고리/레벨/패밀리/타입), IoT(스트림ID/현재 값/갱신 시각/임계치) 등으로 구분된다. 컴포넌트 데이터는 SoA(Structure of Arrays) 방식으로 저장하여 CPU 캐시 효율을 극대화하고, GPU 버퍼로의 직접 업로드를 가능하게 한다.
 
 ### 6.9. Core-Plugin 아키텍처
 
@@ -814,7 +492,7 @@ interface IoTComponent {
 
 | 플러그인                | 핵심 기능                                                      |
 | ----------------------- | -------------------------------------------------------------- |
-| **@dt/measurement**     | 3D 거리/면적/체적/각도 측정. GPU ID 버퍼 기반 포인트 스냅      |
+| **@dt/measurement**     | 3D 거리/면적/체적/각도 측정. 포인트 스냅 기반                  |
 | **@dt/iot-heatmap**     | IoT 센서 스트림을 3D 모델 표면에 색상 그라디언트로 실시간 매핑 |
 | **@dt/space-analysis**  | Room 면적, 재실률, BVH 기반 A\* 최단 피난 경로 산출            |
 | **@dt/version-control** | GUID 기반 모델 버전 diff. 추가/삭제/수정 시각적 표시           |
@@ -854,12 +532,12 @@ WebGL 2.0의 브라우저 지원율이 사실상 100%에 근접하므로, 이중
 | **데이터 추출** | APS DA4R (클라우드, 유료)      | 로컬 C# 플러그인 ($0)                     | 클라우드 비용 제거, 네트워크 지연 제거 |
 | **초기 로드**   | OTG 전체 모델 로드             | LOD 0 타일 즉시 로드                      | 데이터 전송량 대폭 감소                |
 | **렌더링 API**  | WebGL 2.0 단일 (Three.js 포크) | WebGPU 기본 + WebGL 2.0 폴백              | CPU 오버헤드 50%+ 감소 (WebGPU)        |
-| **Draw Call**   | Fragment별 개별 발행           | Multi-Draw Indirect / BatchedMesh         | 수만 -> 수십으로 병합                  |
+| **Draw Call**   | Fragment별 개별 발행           | Multi-Draw Indirect / BatchedMesh         | 수만 → 수십으로 병합                   |
 | **컬링**        | CPU 기반 프러스텀 컬링         | GPU Compute (WebGPU) / Worker BVH (WebGL) | GPU 병렬 또는 메인 스레드 비차단       |
 | **메모리**      | 전체 모델 상주                 | LRU 기반 타일 캐시                        | 메모리 예산 제어 가능                  |
 | **속성 조회**   | Autodesk 서버 왕복             | 4단 캐시 (L1~L3 클라이언트 완결)          | 기본 속성 지연시간 0ms                 |
 | **속성 분석**   | 서버 API 필수                  | DuckDB-WASM 브라우저 측 분석              | 서버 부하 제거, 오프라인 가능          |
-| **인스턴싱**    | 제한적 (OTG 내부)              | glTF `EXT_mesh_gpu_instancing`            | 표준 기반, 완전 제어                   |
+| **인스턴싱**    | 제한적 (OTG 내부)              | glTF 인스턴싱                             | 표준 기반, 완전 제어                   |
 | **확장성**      | Tandem SDK API 제약            | Core-Plugin 아키텍처                      | 무제한 기능 확장                       |
 | **오프라인**    | 불가능 (서버 필수)             | 가능 (로컬 캐시 + DuckDB-WASM)            | 현장 작업 지원                         |
 | **벤더 종속**   | Autodesk 완전 종속             | 완전 독립                                 | 가격/정책 변동 면역                    |
@@ -884,13 +562,13 @@ WebGL 2.0의 브라우저 지원율이 사실상 100%에 근접하므로, 이중
 
 **Phase 1: 데이터 파이프라인 (3개월)**
 
-| 마일스톤                       | 산출물                                                    |
-| ------------------------------ | --------------------------------------------------------- |
-| DTExtractor Revit 플러그인 MVP | `IExportContext` 기반 형상 추출 -> GLB (Draco + 인스턴싱) |
-| MetadataExtractor              | 7종 파라미터 전수 추출 -> Parquet                         |
-| GUID 일치성 검증기             | 형상 GUID vs 속성 GUID 자동 대조                          |
-| PostgreSQL 스키마 구축         | 속성 저장소, JSONB 인덱싱, 버전 관리                      |
-| 배치 처리 파이프라인           | 모델 감시 -> 자동 추출 -> 저장소 업로드                   |
+| 마일스톤                       | 산출물                                                  |
+| ------------------------------ | ------------------------------------------------------- |
+| DTExtractor Revit 플러그인 MVP | `IExportContext` 기반 형상 추출 → GLB (인스턴싱 최적화) |
+| MetadataExtractor              | 7종 파라미터 전수 추출 → Parquet                        |
+| GUID 일치성 검증기             | 형상 GUID vs 속성 GUID 자동 대조                        |
+| PostgreSQL 스키마 구축         | 속성 저장소, JSONB 인덱싱, 버전 관리                    |
+| 배치 처리 파이프라인           | 모델 감시 → 자동 추출 → 저장소 업로드                   |
 
 **Phase 2: 렌더링 엔진 코어 (4개월)**
 
@@ -899,7 +577,7 @@ WebGL 2.0의 브라우저 지원율이 사실상 100%에 근접하므로, 이중
 | Rendering Abstraction Layer | `IRenderBackend` 인터페이스 + WebGPU/WebGL 이중 구현 |
 | WebGPU 파이프라인           | Compute 컬링 + Multi-Draw Indirect + MRT             |
 | WebGL 2.0 파이프라인        | Worker 컬링 + MULTI_DRAW + BatchedMesh + MRT         |
-| 셰이더 추상화               | TSL 노드 그래프 -> WGSL/GLSL 자동 변환               |
+| 셰이더 추상화               | TSL 노드 그래프 → WGSL/GLSL 자동 변환                |
 | 시각적 일관성 검증          | 양 백엔드 렌더 결과 자동 비교 프레임워크             |
 
 **Phase 3: ECS 및 플러그인 시스템 (3개월)**
@@ -943,11 +621,11 @@ WebGL 2.0의 브라우저 지원율이 사실상 100%에 근접하므로, 이중
 
 본 문서에서 제안하는 아키텍처는 세 가지 전략 축을 통해 Autodesk Tandem에 대한 기술적, 재정적 종속을 완전히 제거한다.
 
-**첫째, Zero-Autodesk 데이터 파이프라인.** 자체 C# .NET Revit 플러그인(DTExtractor)을 통해 형상과 메타데이터를 로컬에서 직접 추출한다. `CustomExporter`와 `IExportContext` API를 활용한 형상 추출과, 7종 파라미터 전수 순회를 통한 메타데이터 100% 보존을 구현한다. GLB(형상)와 Parquet(속성)의 이중 출력 전략으로 각 소비자(GPU 렌더링, SQL 분석)에 최적화된 형태를 생성하며, Revit UniqueId(GUID)를 양쪽에 체계적으로 내장하여 런타임 결합의 기반을 확보한다.
+**첫째, Zero-Autodesk 데이터 파이프라인.** 자체 C# .NET Revit 플러그인(DTExtractor)을 통해 형상과 메타데이터를 로컬에서 직접 추출한다. `CustomExporter`와 `IExportContext` API를 활용한 형상 추출과, 7종 파라미터 전수 순회를 통한 메타데이터 보존을 구현한다. GLB(형상)와 Parquet(속성)의 이중 출력 전략으로 각 소비자(GPU 렌더링, SQL 분석)에 최적화된 형태를 생성하며, Revit UniqueId(GUID)를 양쪽에 체계적으로 내장하여 런타임 결합의 기반을 확보한다.
 
-**둘째, 이중 렌더링 엔진.** Three.js `WebGPURenderer`의 설계를 참조하되 BIM 특화 최적화를 자체 구현하여, WebGPU 환경에서는 Compute Shader 기반 GPU 컬링과 Multi-Draw Indirect를 통한 극한 성능을, WebGL 2.0 환경에서는 Web Worker BVH 컬링과 BatchedMesh를 통한 안정적 렌더링을 보장한다. TSL 패턴으로 WGSL/GLSL 이중 작성을 방지하며, Shader의 이중 역할(시각 효과 + GUID 기반 객체 식별)이 Click-to-Data 루프의 기반이 된다.
+**둘째, 이중 렌더링 엔진.** Three.js `WebGPURenderer`의 설계를 참조하되 BIM 특화 최적화를 자체 구현하여, WebGPU 환경에서는 Compute Shader 기반 GPU 컬링과 Multi-Draw Indirect를 통한 극한 성능을, WebGL 2.0 환경에서는 Web Worker BVH 컬링과 BatchedMesh를 통한 안정적 렌더링을 보장한다.
 
-**셋째, GUID 기반 데이터 연합과 모듈형 시스템.** Revit UniqueId를 7개 데이터 레이어(형상, 속성, 분석, 공간, IoT, 아카이브, 인라인)를 관통하는 유일한 연결 키로 사용하여, Click-to-Data 루프를 100ms 이내에 완결한다. ECS 기반 데이터 아키텍처와 Core-Plugin 분리로 모든 도메인 기능을 독립 모듈로 구현하고, Event Bus 기반의 느슨한 결합으로 장기적 확장성을 보장한다.
+**셋째, GUID 기반 데이터 연합과 모듈형 시스템.** Revit UniqueId를 다수의 데이터 레이어(형상, 속성, 분석, 공간, IoT, 아카이브)를 관통하는 유일한 연결 키로 사용하여, Click-to-Data 루프를 100ms 이내에 완결한다. ECS 기반 데이터 아키텍처와 Core-Plugin 분리로 모든 도메인 기능을 독립 모듈로 구현하고, Event Bus 기반의 느슨한 결합으로 장기적 확장성을 보장한다.
 
 이 세 축의 결합은 단순한 뷰어 교체가 아니라, **디지털 트윈 서비스의 운영 주권 확보**를 의미한다. 데이터 추출, 렌더링, 분석의 모든 과정에서 외부 벤더에 대한 의존성이 제거되며, 엔진 자체가 회사의 핵심 기술 자산으로 기능한다.
 
