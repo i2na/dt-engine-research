@@ -175,15 +175,13 @@ https://github.com/user-attachments/assets/ad315873-fe85-4c3a-80e3-8fc57bb970f7
 
 1. Revit에서 모델을 열고 `Default 3D View`를 생성한다.
 2. `DT Engine` -> `Export to DT Engine`을 클릭한다.
-3. 출력 파일명을 `model.glb`로 지정하고 아래 경로에 저장한다.
-    - `[프로젝트폴더]/web-viewer/public/models/model.glb`
-4. 내보내기 완료 후 아래 두 파일 생성 여부를 확인한다.
+3. 내보내기 완료 후 아래 두 파일 생성 여부를 확인한다.
     - `model.glb`
     - `model.parquet`
 
 ### 3) 웹 뷰어 실행
 
-생성한 두 파일(`.glb`, `.parquet`)을 `web-viewer/public/models/`에 넣고,
+생성한 두 파일(`.glb`, `.parquet`)을 `web-viewer/public/models/`에 넣는다.
 `web-viewer/src/constants.ts`의 `MODEL_BASE_NAME`을 실제 파일명(확장자 제외)과 일치하게 수정한다.
 
 ```bash
